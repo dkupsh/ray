@@ -28,7 +28,7 @@ from ray.rllib.utils.torch_utils import (
 
 torch, _ = try_import_torch()
 
-class AlphaZeroTorchPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
+class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
     
     def __init__(self, observation_space, action_space, config):
         TorchPolicyV2.__init__(
