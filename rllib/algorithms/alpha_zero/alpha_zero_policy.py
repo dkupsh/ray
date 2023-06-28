@@ -1,82 +1,147 @@
 import numpy as np
+from typing import Dict, List, Type, Union, Tuple, Optional
 
+from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.alpha_zero.mcts import Node, RootParentNode
-from ray.rllib.policy.policy import Policy
-from ray.rllib.policy.torch_policy import TorchPolicy
+from ray.rllib.models.modelv2 import ModelV2
+from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
+from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2
+from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.policy.torch_mixins import ValueNetworkMixin, LearningRateSchedule
+from ray.rllib.algorithms.alpha_zero.mcts import MCTS
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.framework import try_import_torch
 from ray.rllib.utils.metrics.learner_info import LEARNER_STATS_KEY
+from ray.rllib.utils.typing import TensorType
+from ray.rllib.utils.numpy import convert_to_numpy
+
+from ray.rllib.evaluation.postprocessing import (
+    Postprocessing,
+    compute_gae_for_sample_batch
+)
+
+from ray.rllib.utils.torch_utils import (
+    explained_variance,
+    apply_grad_clipping
+)
+
 
 torch, _ = try_import_torch()
 
-
-class AlphaZeroPolicy(TorchPolicy):
-    def __init__(
-        self,
-        observation_space,
-        action_space,
-        config,
-        model,
-        loss,
-        action_distribution_class,
-        mcts_creator,
-        env_creator,
-        **kwargs
-    ):
-        super().__init__(
+class AlphaZeroTorchPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
+    
+    def __init__(self, observation_space, action_space, config):
+        TorchPolicyV2.__init__(
+            self,
             observation_space,
             action_space,
             config,
-            model=model,
-            loss=loss,
-            action_distribution_class=action_distribution_class,
+            max_seq_len=config["model"]["max_seq_len"],
         )
-        # we maintain an env copy in the policy that is used during mcts
-        # simulations
-        self.env_creator = env_creator
-        self.mcts = mcts_creator()
-        self.env = self.env_creator()
-        self.env.reset()
-        self.obs_space = observation_space
-
-    @override(TorchPolicy)
-    def compute_actions(
+        
+        ValueNetworkMixin.__init__(self, config)
+        LearningRateSchedule.__init__(self, config["lr"], config["lr_schedule"])
+        
+        # Specific MCTS Settings
+        self.env = Algorithm._get_env_id_and_creator(config["env"], config)()
+        self.mcts =  MCTS(self.model, config["mcts_config"])
+        
+        self._initialize_loss_from_dummy_batch()
+        
+    
+    @override(TorchPolicyV2)
+    def loss(
         self,
-        obs_batch,
-        state_batches=None,
-        prev_action_batch=None,
-        prev_reward_batch=None,
-        info_batch=None,
-        episodes=None,
-        **kwargs
-    ):
-
-        input_dict = {"obs": obs_batch}
-        if prev_action_batch is not None:
-            input_dict["prev_actions"] = prev_action_batch
-        if prev_reward_batch is not None:
-            input_dict["prev_rewards"] = prev_reward_batch
-
-        return self.compute_actions_from_input_dict(
-            input_dict=input_dict,
-            episodes=episodes,
-            state_batches=state_batches,
+        model: ModelV2,
+        dist_class: Type[TorchDistributionWrapper],
+        train_batch: SampleBatch,
+    ) -> Union[TensorType, List[TensorType]]:
+            # get inputs unflattened inputs
+        model_out, _ = model(train_batch)
+        action_dist = dist_class(model_out, model)
+        actions = train_batch[SampleBatch.ACTIONS]
+        logprobs = action_dist.logp(actions)
+        
+        # Compute Policy Loss
+        policy_loss = torch.mean(
+            -torch.sum(train_batch["mcts_policies"] * logprobs, dim=-1)
         )
-
-    @override(Policy)
-    def compute_actions_from_input_dict(
-        self, input_dict, explore=None, timestep=None, episodes=None, **kwargs
+        
+        # Compute Value Loss
+        value_fn_out = model.value_function()
+        value_loss = torch.pow(
+            value_fn_out - train_batch[Postprocessing.VALUE_TARGETS], 2.0
+        )
+        if "vf_clip_param" in self.config:
+            value_loss = torch.clamp(value_loss, 0, self.config["vf_clip_param"])
+        value_loss = torch.mean(value_loss)
+        
+        # Log Stats
+        model.tower_stats["total_loss"] = total_loss
+        model.tower_stats["mean_policy_loss"] = policy_loss
+        model.tower_stats["mean_vf_loss"] = value_loss
+        model.tower_stats["vf_explained_var"] = explained_variance(
+            train_batch[Postprocessing.VALUE_TARGETS], value_fn_out
+        )
+        
+        # compute total loss
+        total_loss = policy_loss + self.config["vf_coeff"] * value_loss
+        return total_loss
+    
+    @override(TorchPolicyV2)
+    def stats_fn(self, train_batch: SampleBatch) -> Dict[str, TensorType]:
+        return convert_to_numpy(
+            {
+                "cur_lr": self.cur_lr,
+                "total_loss": torch.mean(
+                    torch.stack(self.get_tower_stats("total_loss"))
+                ),
+                "policy_loss": torch.mean(
+                    torch.stack(self.get_tower_stats("mean_policy_loss"))
+                ),
+                "vf_loss": torch.mean(
+                    torch.stack(self.get_tower_stats("mean_vf_loss"))
+                ),
+                "vf_explained_var": torch.mean(
+                    torch.stack(self.get_tower_stats("vf_explained_var"))
+                ),
+            }
+        )
+    
+    def extra_grad_process(
+        self, optimizer: "torch.optim.Optimizer", loss: TensorType
+    ) -> Dict[str, TensorType]:
+        return apply_grad_clipping(self, optimizer, loss)
+        
+    @override(TorchPolicyV2)
+    def postprocess_trajectory(
+        self, sample_batch, other_agent_batches=None, episode=None
     ):
+        with torch.no_grad():
+            batch =  compute_gae_for_sample_batch(
+                self, sample_batch, other_agent_batches, episode
+            )
+            
+            batch["mcts_policies"] = np.array(episode.user_data["mcts_policies"])[sample_batch["t"]]
+            
+            return batch
+    
+    @override(TorchPolicyV2)
+    def compute_actions_from_input_dict(
+        self,
+        input_dict: Dict[str, TensorType],
+        explore: bool = None,
+        timestep: Optional[int] = None,
+        episodes = None,
+        **kwargs,
+    ) -> Tuple[TensorType, List[TensorType], Dict[str, TensorType]]:
         with torch.no_grad():
             actions = []
             for i, episode in enumerate(episodes):
                 if episode.length == 0:
                     # if first time step of episode, get initial env state
                     env_state = episode.user_data["initial_state"]
-                    # verify if env has been wrapped for ranked rewards
-                    if self.env.__class__.__name__ == "RankedRewardsEnvWrapper":
-                        # r2 env state contains also the rewards buffer state
-                        env_state = {"env_state": env_state, "buffer_state": None}
+                    
                     # create tree root node
                     obs = self.env.set_state(env_state)
                     tree_node = Node(
@@ -113,46 +178,3 @@ class AlphaZeroPolicy(TorchPolicy):
                     input_dict, kwargs.get("state_batches", []), self.model, None
                 ),
             )
-
-    @override(Policy)
-    def postprocess_trajectory(
-        self, sample_batch, other_agent_batches=None, episode=None
-    ):
-        # add mcts policies to sample batch
-        sample_batch["mcts_policies"] = np.array(episode.user_data["mcts_policies"])[
-            sample_batch["t"]
-        ]
-        # final episode reward corresponds to the value (if not discounted)
-        # for all transitions in episode
-        final_reward = sample_batch["rewards"][-1]
-        # if r2 is enabled, then add the reward to the buffer and normalize it
-        if self.env.__class__.__name__ == "RankedRewardsEnvWrapper":
-            self.env.r2_buffer.add_reward(final_reward)
-            final_reward = self.env.r2_buffer.normalize(final_reward)
-        sample_batch["value_label"] = final_reward * np.ones_like(sample_batch["t"])
-        return sample_batch
-
-    @override(TorchPolicy)
-    def learn_on_batch(self, postprocessed_batch):
-        train_batch = self._lazy_tensor_dict(postprocessed_batch)
-
-        loss_out, policy_loss, value_loss = self._loss(
-            self, self.model, self.dist_class, train_batch
-        )
-        self._optimizers[0].zero_grad()
-        loss_out.backward()
-
-        grad_process_info = self.extra_grad_process(self._optimizers[0], loss_out)
-        self._optimizers[0].step()
-
-        grad_info = self.extra_grad_info(train_batch)
-        grad_info.update(grad_process_info)
-        grad_info.update(
-            {
-                "total_loss": loss_out.detach().cpu().numpy(),
-                "policy_loss": policy_loss.detach().cpu().numpy(),
-                "value_loss": value_loss.detach().cpu().numpy(),
-            }
-        )
-
-        return {LEARNER_STATS_KEY: grad_info}

@@ -32,9 +32,7 @@ from ray.rllib.utils.metrics import (
 from ray.rllib.utils.replay_buffers.utils import validate_buffer_config
 from ray.rllib.utils.typing import ResultDict
 
-from ray.rllib.algorithms.alpha_zero.alpha_zero_policy import AlphaZeroPolicy
-from ray.rllib.algorithms.alpha_zero.mcts import MCTS
-from ray.rllib.algorithms.alpha_zero.ranked_rewards import get_r2_env_wrapper
+from ray.rllib.algorithms.alpha_zero.alpha_zero_policy import AlphaZeroTorchPolicy
 
 torch, nn = try_import_torch()
 
@@ -112,6 +110,8 @@ class AlphaZeroConfig(AlgorithmConfig):
         # steps  or environment steps depends on config.multi_agent(count_steps_by=..).
         self.num_steps_sampled_before_learning_starts = 1000
         self.lr_schedule = None
+        self.vf_clip_param = 10.0
+        self.vf_loss_coeff = 1.0
         self.vf_share_layers = False
         self.mcts_config = {
             "puct_coefficient": 1.0,
@@ -121,15 +121,6 @@ class AlphaZeroConfig(AlgorithmConfig):
             "dirichlet_noise": 0.03,
             "argmax_tree_policy": False,
             "add_dirichlet_noise": True,
-        }
-        self.ranked_rewards = {
-            "enable": True,
-            "percentile": 75,
-            "buffer_max_length": 1000,
-            # add rewards obtained from random policy to
-            # "warm start" the buffer
-            "initialize_buffer": True,
-            "num_init_rewards": 100,
         }
 
         # Override some of AlgorithmConfig's default values with AlphaZero-specific
@@ -172,8 +163,9 @@ class AlphaZeroConfig(AlgorithmConfig):
         replay_buffer_config: Optional[dict] = NotProvided,
         lr_schedule: Optional[List[List[Union[int, float]]]] = NotProvided,
         vf_share_layers: Optional[bool] = NotProvided,
+        vf_clip_param: Optional[int] = NotProvided,
+        vf_loss_coeff: Optional[float] = NotProvided,
         mcts_config: Optional[dict] = NotProvided,
-        ranked_rewards: Optional[dict] = NotProvided,
         num_steps_sampled_before_learning_starts: Optional[int] = NotProvided,
         **kwargs,
     ) -> "AlphaZeroConfig":
@@ -225,8 +217,6 @@ class AlphaZeroConfig(AlgorithmConfig):
             vf_share_layers: Share layers for value function. If you set this to True,
                 it's important to tune vf_loss_coeff.
             mcts_config: MCTS specific settings.
-            ranked_rewards: Settings for the ranked reward (r2) algorithm
-                from: https://arxiv.org/pdf/1807.01672.pdf
             num_steps_sampled_before_learning_starts: Number of timesteps to collect
                 from rollout workers before we start sampling from replay buffers for
                 learning. Whether we count this in agent steps  or environment steps
@@ -252,8 +242,11 @@ class AlphaZeroConfig(AlgorithmConfig):
             self.vf_share_layers = vf_share_layers
         if mcts_config is not NotProvided:
             self.mcts_config = mcts_config
-        if ranked_rewards is not NotProvided:
-            self.ranked_rewards.update(ranked_rewards)
+        if vf_clip_param is not NotProvided:
+            self.vf_clip_param = vf_clip_param
+        if vf_loss_coeff is not NotProvided:
+            self.vf_loss_coeff = vf_loss_coeff
+        
         if num_steps_sampled_before_learning_starts is not NotProvided:
             self.num_steps_sampled_before_learning_starts = (
                 num_steps_sampled_before_learning_starts
@@ -265,10 +258,6 @@ class AlphaZeroConfig(AlgorithmConfig):
     def update_from_dict(self, config_dict) -> "AlphaZeroConfig":
         config_dict = config_dict.copy()
 
-        if "ranked_rewards" in config_dict:
-            value = config_dict.pop("ranked_rewards")
-            self.training(ranked_rewards=value)
-
         return super().update_from_dict(config_dict)
 
     @override(AlgorithmConfig)
@@ -278,70 +267,6 @@ class AlphaZeroConfig(AlgorithmConfig):
         super().validate()
         validate_buffer_config(self)
 
-
-def alpha_zero_loss(policy, model, dist_class, train_batch):
-    # get inputs unflattened inputs
-    input_dict = restore_original_dimensions(
-        train_batch["obs"], policy.observation_space, "torch"
-    )
-    # forward pass in model
-    model_out = model.forward(input_dict, None, [1])
-    logits, _ = model_out
-    values = model.value_function()
-    logits, values = torch.squeeze(logits), torch.squeeze(values)
-    priors = nn.Softmax(dim=-1)(logits)
-    # compute actor and critic losses
-    policy_loss = torch.mean(
-        -torch.sum(train_batch["mcts_policies"] * torch.log(priors), dim=-1)
-    )
-    value_loss = torch.mean(torch.pow(values - train_batch["value_label"], 2))
-    # compute total loss
-    total_loss = (policy_loss + value_loss) / 2
-    return total_loss, policy_loss, value_loss
-
-
-class AlphaZeroPolicyWrapperClass(AlphaZeroPolicy):
-    def __init__(self, obs_space, action_space, config):
-        model = ModelCatalog.get_model_v2(
-            obs_space, action_space, action_space.n, config["model"], "torch"
-        )
-        _, env_creator = Algorithm._get_env_id_and_creator(config["env"], config)
-        if config["ranked_rewards"]["enable"]:
-            # if r2 is enabled, tne env is wrapped to include a rewards buffer
-            # used to normalize rewards
-            env_cls = get_r2_env_wrapper(env_creator, config["ranked_rewards"])
-
-            # the wrapped env is used only in the mcts, not in the
-            # rollout workers
-            def _env_creator():
-                return env_cls(config["env_config"])
-
-        else:
-
-            def _env_creator():
-                return env_creator(config["env_config"])
-
-        def mcts_creator():
-            return MCTS(model, config["mcts_config"])
-
-        super().__init__(
-            obs_space,
-            action_space,
-            config,
-            model,
-            alpha_zero_loss,
-            TorchCategorical,
-            mcts_creator,
-            _env_creator,
-        )
-
-
-@Deprecated(
-    old="rllib/algorithms/alpha_star/",
-    new="rllib_contrib/alpha_star/",
-    help=ALGO_DEPRECATION_WARNING,
-    error=False,
-)
 class AlphaZero(Algorithm):
     @classmethod
     @override(Algorithm)
@@ -353,7 +278,7 @@ class AlphaZero(Algorithm):
     def get_default_policy_class(
         cls, config: AlgorithmConfig
     ) -> Optional[Type[Policy]]:
-        return AlphaZeroPolicyWrapperClass
+        return AlphaZeroTorchPolicy
 
     @override(Algorithm)
     def training_step(self) -> ResultDict:
