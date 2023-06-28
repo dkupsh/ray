@@ -32,7 +32,7 @@ from ray.rllib.utils.metrics import (
 from ray.rllib.utils.replay_buffers.utils import validate_buffer_config
 from ray.rllib.utils.typing import ResultDict
 
-from ray.rllib.algorithms.alpha_zero.alpha_zero_policy import AlphaZeroTorchPolicy
+from ray.rllib.algorithms.alpha_zero.alpha_zero_policy import AlphaZeroPolicy
 
 torch, nn = try_import_torch()
 
@@ -278,7 +278,7 @@ class AlphaZero(Algorithm):
     def get_default_policy_class(
         cls, config: AlgorithmConfig
     ) -> Optional[Type[Policy]]:
-        return AlphaZeroTorchPolicy
+        return AlphaZeroPolicy
 
     @override(Algorithm)
     def training_step(self) -> ResultDict:
