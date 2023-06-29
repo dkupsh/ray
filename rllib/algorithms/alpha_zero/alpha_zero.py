@@ -113,7 +113,7 @@ class AlphaZeroConfig(AlgorithmConfig):
         self.num_steps_sampled_before_learning_starts = 1000
         self.lr_schedule = None
         self.vf_clip_param = 10.0
-        self.vf_loss_coeff = 1.0
+        self.vf_coeff = 1.0
         self.vf_share_layers = False
         self.mcts_config = {
             "puct_coefficient": 1.0,
@@ -247,7 +247,7 @@ class AlphaZeroConfig(AlgorithmConfig):
         if vf_clip_param is not NotProvided:
             self.vf_clip_param = vf_clip_param
         if vf_loss_coeff is not NotProvided:
-            self.vf_loss_coeff = vf_loss_coeff
+            self.vf_coeff = vf_loss_coeff
         
         if num_steps_sampled_before_learning_starts is not NotProvided:
             self.num_steps_sampled_before_learning_starts = (

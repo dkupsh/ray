@@ -32,7 +32,7 @@ class Node:
         self.state = state
         self.obs = obs
 
-        self.mcts = mcts
+        self.mcts : MCTS = mcts
 
     @property
     def number_visits(self):

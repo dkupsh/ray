@@ -30,7 +30,7 @@ from ray.rllib.utils.torch_utils import (
 )
 
 
-torch, _ = try_import_torch()
+torch, nn = try_import_torch()
 
 class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
     
@@ -59,6 +59,8 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         self.view_requirements['mcts_policies'] = ViewRequirement(
             used_for_compute_actions=False
         )
+        
+        
     
     @override(TorchPolicyV2)
     def loss(
@@ -74,13 +76,20 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         
         # get inputs unflattened inputs
         model_out, _ = model(input_dict, None, [1])
+        logits = torch.squeeze(model_out)
+        priors = nn.Softmax(dim=-1)(logits)
+        
+        '''
         action_dist = dist_class(model_out, model)
         actions = train_batch[SampleBatch.ACTIONS]
         logprobs = action_dist.logp(actions)
+        '''
+        if priors.shape != train_batch["mcts_policies"].shape:
+            raise ValueError("logprobs and mcts_policies must have the same shape", priors.shape, train_batch["mcts_policies"].shape)
         
         # Compute Policy Loss
         policy_loss = torch.mean(
-            -torch.sum(train_batch["mcts_policies"] * logprobs, dim=-1)
+            -torch.sum(train_batch["mcts_policies"] * torch.log(priors), dim=-1)
         )
         
         # Compute Value Loss
@@ -92,6 +101,9 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
             value_loss = torch.clamp(value_loss, 0, self.config["vf_clip_param"])
         value_loss = torch.mean(value_loss)
         
+        # compute total loss
+        total_loss = policy_loss + self.config["vf_coeff"] * value_loss
+        
         # Log Stats
         model.tower_stats["total_loss"] = total_loss
         model.tower_stats["mean_policy_loss"] = policy_loss
@@ -100,8 +112,6 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
             train_batch[Postprocessing.VALUE_TARGETS], value_fn_out
         )
         
-        # compute total loss
-        total_loss = policy_loss + self.config["vf_coeff"] * value_loss
         return total_loss
     
     @override(TorchPolicyV2)
