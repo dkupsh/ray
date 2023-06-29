@@ -60,7 +60,17 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
             used_for_compute_actions=False
         )
         
+        self.view_requirements[SampleBatch.VALUES_BOOTSTRAPPED] = ViewRequirement(
+            used_for_compute_actions=False
+        )
         
+        self.view_requirements[Postprocessing.ADVANTAGES] = ViewRequirement(
+            used_for_compute_actions=False
+        )
+        
+        self.view_requirements[Postprocessing.VALUE_TARGETS] = ViewRequirement(
+            used_for_compute_actions=False
+        )
     
     @override(TorchPolicyV2)
     def loss(
