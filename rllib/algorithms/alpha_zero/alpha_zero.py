@@ -95,6 +95,8 @@ class AlphaZeroConfig(AlgorithmConfig):
         # __sphinx_doc_begin__
         # AlphaZero specific config settings:
         self.sgd_minibatch_size = 128
+        self.use_gae = True
+        self.lambda_ = 1.0
         self.shuffle_sequences = True
         self.num_sgd_iter = 30
         self.replay_buffer_config = {

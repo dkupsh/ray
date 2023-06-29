@@ -1,6 +1,8 @@
 import numpy as np
 from typing import Dict, List, Type, Union, Tuple, Optional
 
+import gymnasium as gym
+
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.alpha_zero.mcts import Node, RootParentNode
 from ray.rllib.models.modelv2 import ModelV2
@@ -9,6 +11,8 @@ from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy.torch_mixins import ValueNetworkMixin, LearningRateSchedule
 from ray.rllib.algorithms.alpha_zero.mcts import MCTS
+from ray.rllib.evaluation.episode_v2 import EpisodeV2
+from ray.rllib.policy.view_requirement import ViewRequirement
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.framework import try_import_torch
 from ray.rllib.utils.metrics.learner_info import LEARNER_STATS_KEY
@@ -42,12 +46,19 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         ValueNetworkMixin.__init__(self, config)
         LearningRateSchedule.__init__(self, config["lr"], config["lr_schedule"])
         
+        _, env_creator = Algorithm._get_env_id_and_creator(config["env"], config)
         # Specific MCTS Settings
-        self.env = Algorithm._get_env_id_and_creator(config["env"], config)()
+        self.env = env_creator(config['env_config'])
         self.mcts =  MCTS(self.model, config["mcts_config"])
         
-        self._initialize_loss_from_dummy_batch()
+        self.view_requirements[SampleBatch.VF_PREDS] = ViewRequirement(
+            space=gym.spaces.Box(-1.0, 1.0, shape=(), dtype=np.float32),
+            used_for_compute_actions=False
+        )
         
+        self.view_requirements['mcts_policies'] = ViewRequirement(
+            used_for_compute_actions=False
+        )
     
     @override(TorchPolicyV2)
     def loss(
@@ -112,20 +123,7 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         self, optimizer: "torch.optim.Optimizer", loss: TensorType
     ) -> Dict[str, TensorType]:
         return apply_grad_clipping(self, optimizer, loss)
-        
-    @override(TorchPolicyV2)
-    def postprocess_trajectory(
-        self, sample_batch, other_agent_batches=None, episode=None
-    ):
-        with torch.no_grad():
-            batch =  compute_gae_for_sample_batch(
-                self, sample_batch, other_agent_batches, episode
-            )
-            
-            batch["mcts_policies"] = np.array(episode.user_data["mcts_policies"])[sample_batch["t"]]
-            
-            return batch
-    
+
     @override(TorchPolicyV2)
     def compute_actions_from_input_dict(
         self,
@@ -136,10 +134,15 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         **kwargs,
     ) -> Tuple[TensorType, List[TensorType], Dict[str, TensorType]]:
         with torch.no_grad():
+            input_dict = self._lazy_tensor_dict(input_dict)
+            input_dict.set_training(True)
+            
+            if episodes is None:
+                raise ValueError("Episodes must be passed in for AlphaZeroPolicy. Got None")
+            
             actions = []
             for i, episode in enumerate(episodes):
                 if episode.length == 0:
-                    # if first time step of episode, get initial env state
                     env_state = episode.user_data["initial_state"]
                     
                     # create tree root node
@@ -170,11 +173,24 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
                     episode.user_data["mcts_policies"] = [mcts_policy]
                 else:
                     episode.user_data["mcts_policies"].append(mcts_policy)
+            
+            extra_fetches = self.extra_action_out(
+                input_dict, kwargs.get("state_batches", []), self.model, None
+            )
 
             return (
                 np.array(actions),
                 [],
-                self.extra_action_out(
-                    input_dict, kwargs.get("state_batches", []), self.model, None
-                ),
+                convert_to_numpy(extra_fetches),
+            )
+    
+    @override(TorchPolicyV2)
+    def postprocess_trajectory(
+        self, sample_batch, other_agent_batches=None, episode=None
+    ):
+        with torch.no_grad():
+            sample_batch["mcts_policies"] = np.array(episode.user_data["mcts_policies"])[sample_batch["t"]]
+            
+            return compute_gae_for_sample_batch(
+                self, sample_batch, other_agent_batches, episode
             )
