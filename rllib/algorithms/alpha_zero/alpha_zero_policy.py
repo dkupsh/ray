@@ -11,12 +11,12 @@ from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy.torch_mixins import ValueNetworkMixin, LearningRateSchedule
 from ray.rllib.algorithms.alpha_zero.mcts import MCTS
-from ray.rllib.evaluation.episode_v2 import EpisodeV2
 from ray.rllib.policy.view_requirement import ViewRequirement
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.framework import try_import_torch
 from ray.rllib.utils.metrics.learner_info import LEARNER_STATS_KEY
 from ray.rllib.utils.typing import TensorType
+from ray.rllib.models.modelv2 import restore_original_dimensions
 from ray.rllib.utils.numpy import convert_to_numpy
 
 from ray.rllib.evaluation.postprocessing import (
@@ -67,8 +67,13 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         dist_class: Type[TorchDistributionWrapper],
         train_batch: SampleBatch,
     ) -> Union[TensorType, List[TensorType]]:
-            # get inputs unflattened inputs
-        model_out, _ = model(train_batch)
+        
+        input_dict = restore_original_dimensions(
+            train_batch["obs"], self.observation_space, "torch"
+        )
+        
+        # get inputs unflattened inputs
+        model_out, _ = model(input_dict, None, [1])
         action_dist = dist_class(model_out, model)
         actions = train_batch[SampleBatch.ACTIONS]
         logprobs = action_dist.logp(actions)
