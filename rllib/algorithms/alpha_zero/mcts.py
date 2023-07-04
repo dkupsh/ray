@@ -9,9 +9,10 @@ import numpy as np
 
 
 class Node:
-    def __init__(self, action, obs, done, reward, state, mcts, parent=None):
+    def __init__(self, action, action_list, obs, done, reward, state, mcts, parent=None):
         self.env = parent.env
         self.action = action  # Action used to go to this state
+        self.action_list = action_list # Actions used to go to this state from root
 
         self.is_expanded = False
         self.parent = parent
@@ -68,7 +69,8 @@ class Node:
         child_score = self.child_Q() + self.mcts.c_puct * self.child_U()
         masked_child_score = child_score
         masked_child_score[~self.valid_actions] = -np.inf
-        return np.argmax(masked_child_score)
+        
+        return  np.argmax(masked_child_score)
 
     def select(self):
         current_node = self
@@ -80,14 +82,20 @@ class Node:
     def expand(self, child_priors):
         self.is_expanded = True
         self.child_priors = child_priors
+    
+    def has_child(self, action):
+        return action in self.children
 
     def get_child(self, action):
         if action not in self.children:
             self.env.set_state(self.state)
-            obs, reward, terminated, truncated, _ = self.env.step(action)
+            
+            obs, reward, terminated, truncated, info = self.env.step(action)
+                
             next_state = self.env.get_state()
             self.children[action] = Node(
                 state=next_state,
+                action_list=self.action_list + [action],
                 action=action,
                 parent=self,
                 reward=reward,
@@ -95,6 +103,8 @@ class Node:
                 obs=obs,
                 mcts=self.mcts,
             )
+            self.mcts.nodes_expanded += 1
+            
         return self.children[action]
 
     def backup(self, value):
@@ -114,15 +124,42 @@ class RootParentNode:
 
 
 class MCTS:
-    def __init__(self, model, mcts_param):
+    def __init__(self, model, env, mcts_param : dict):
+        # Baseline Parameters
         self.model = model
-        self.temperature = mcts_param["temperature"]
-        self.dir_epsilon = mcts_param["dirichlet_epsilon"]
-        self.dir_noise = mcts_param["dirichlet_noise"]
-        self.num_sims = mcts_param["num_simulations"]
-        self.exploit = mcts_param["argmax_tree_policy"]
-        self.add_dirichlet_noise = mcts_param["add_dirichlet_noise"]
-        self.c_puct = mcts_param["puct_coefficient"]
+        self.env = env
+        
+        self.nodes_expanded = 0
+        
+        # Calculate Root Node
+        obs, _ = env.reset()
+        state = env.get_state()
+        self.root = Node(
+            state=env.get_state(),
+            obs=obs,
+            reward=0,
+            done=False,
+            action=None,
+            action_list=[],
+            parent=RootParentNode(env=self.env),
+            mcts=self,
+        )
+        
+        self.temperature = mcts_param.get("temperature", 1.0)
+        self.dir_epsilon = mcts_param.get("dirichlet_epsilon", 0.25)
+        self.dir_noise = mcts_param.get("dirichlet_noise", 0.03)
+        self.num_sims = mcts_param.get("num_simulations", 0)
+        self.exploit = mcts_param.get("argmax_tree_policy", False)
+        self.add_dirichlet_noise = mcts_param.get("add_dirichlet_noise", False)
+        self.c_puct = mcts_param.get("puct_coefficient", 1.0)
+    
+    def get_node(self, actions):
+        node = self.root
+        for action in actions:
+            node = node.get_child(action)
+        if np.array_equal(node.action_list, actions) == False:
+            raise Exception('Node action list', node.action_list, 'does not match action list', actions)
+        return node
 
     def compute_action(self, node):
         for _ in range(self.num_sims):
@@ -154,4 +191,4 @@ class MCTS:
         else:
             # otherwise sample an action according to tree policy probabilities
             action = np.random.choice(np.arange(node.action_space_size), p=tree_policy)
-        return tree_policy, action, node.children[action]
+        return tree_policy, action

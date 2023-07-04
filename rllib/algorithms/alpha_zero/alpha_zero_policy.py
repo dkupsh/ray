@@ -49,7 +49,7 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         _, env_creator = Algorithm._get_env_id_and_creator(config["env"], config)
         # Specific MCTS Settings
         self.env = env_creator(config['env_config'])
-        self.mcts =  MCTS(self.model, config["mcts_config"])
+        self.mcts : MCTS =  MCTS(self.model, self.env, config["mcts_config"])
         
         self.view_requirements[SampleBatch.VF_PREDS] = ViewRequirement(
             space=gym.spaces.Box(-1.0, 1.0, shape=(), dtype=np.float32),
@@ -57,6 +57,7 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         )
         
         self.view_requirements['mcts_policies'] = ViewRequirement(
+            space=gym.spaces.Box(-np.inf, np.inf, shape=(42,), dtype=np.float32),
             used_for_compute_actions=False
         )
         
@@ -129,6 +130,7 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         return convert_to_numpy(
             {
                 "cur_lr": self.cur_lr,
+                "node_expansions": self.mcts.nodes_expanded,
                 "total_loss": torch.mean(
                     torch.stack(self.get_tower_stats("total_loss"))
                 ),
@@ -155,15 +157,26 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         input_dict: Dict[str, TensorType],
         explore: bool = None,
         timestep: Optional[int] = None,
+        prior_actions: Optional[int] = [],
         episodes = None,
         **kwargs,
     ) -> Tuple[TensorType, List[TensorType], Dict[str, TensorType]]:
         with torch.no_grad():
-            input_dict = self._lazy_tensor_dict(input_dict)
+            input_dict = self._lazy_tensor_dict(input_dict) 
             input_dict.set_training(True)
             
-            if episodes is None:
-                raise ValueError("Episodes must be passed in for AlphaZeroPolicy. Got None")
+            # Switch to eval mode.
+            if self.model:
+                self.model.eval()
+            
+            if episodes is None or len(episodes) == 0:
+                return self._compute_action_helper(prior_actions, input_dict)
+                
+            if len(episodes) == 1:
+                actions = episodes[0].user_data.get("actions", [])
+                return self._compute_action_helper(actions, input_dict, episodes[0])
+            else:
+                raise ValueError("MCTS Policy can only handle one episode at a time")
             
             actions = []
             for i, episode in enumerate(episodes):
@@ -209,13 +222,38 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
                 convert_to_numpy(extra_fetches),
             )
     
+    def _compute_action_helper(self, prior_actions, input_dict, episode=None, **kwargs):
+        node = self.mcts.get_node(prior_actions)
+        mcts_policy, action = self.mcts.compute_action(node)
+        
+        extra_fetches = self.extra_action_out(
+            input_dict, kwargs.get("state_batches", []), self.model, None
+        )
+        extra_fetches["mcts_policies"] = mcts_policy
+        
+        if episode is not None:
+            episode.user_data["actions"] = prior_actions + [action]
+            
+            # TODO: Temporary until I can figure out how to store mcts policies in extra_fetches
+            prior_mcts_policies = episode.user_data.get("mcts_policies", [])
+            episode.user_data["mcts_policies"] = prior_mcts_policies + [mcts_policy]
+        
+        return convert_to_numpy(([action], [], extra_fetches))
+    
     @override(TorchPolicyV2)
     def postprocess_trajectory(
         self, sample_batch, other_agent_batches=None, episode=None
     ):
         with torch.no_grad():
-            sample_batch["mcts_policies"] = np.array(episode.user_data["mcts_policies"])[sample_batch["t"]]
+            if episode is not None: 
+                sample_batch["mcts_policies"] = np.array(
+                    episode.user_data["mcts_policies"]
+                )[sample_batch["t"]]
+            
             
             return compute_gae_for_sample_batch(
                 self, sample_batch, other_agent_batches, episode
             )
+        
+    
+    
