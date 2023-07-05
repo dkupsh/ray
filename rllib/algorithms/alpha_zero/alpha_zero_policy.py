@@ -30,6 +30,9 @@ from ray.rllib.utils.torch_utils import (
 )
 
 
+from ray.rllib.algorithms.alpha_zero.ranked_rewards import get_r2_env_wrapper
+
+
 torch, nn = try_import_torch()
 
 class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
@@ -47,8 +50,13 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         LearningRateSchedule.__init__(self, config["lr"], config["lr_schedule"])
         
         _, env_creator = Algorithm._get_env_id_and_creator(config["env"], config)
+        
+        if self.config['ranked_rewards'].get('enabled', True):
+            self.env = get_r2_env_wrapper(env_creator(config['env_config']), self.config['ranked_rewards'])
+        else:
+            self.env = env_creator(config['env_config'])
+        
         # Specific MCTS Settings
-        self.env = env_creator(config['env_config'])
         self.mcts : MCTS =  MCTS(self.model, self.env, config["mcts_config"])
         
         self.view_requirements[SampleBatch.VF_PREDS] = ViewRequirement(

@@ -98,7 +98,7 @@ class Node:
                 action_list=self.action_list + [action],
                 action=action,
                 parent=self,
-                reward=reward,
+                reward=reward + self.reward,
                 done=terminated,
                 obs=obs,
                 mcts=self.mcts,

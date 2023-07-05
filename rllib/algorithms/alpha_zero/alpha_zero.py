@@ -302,7 +302,7 @@ class AlphaZero(Algorithm):
             # Store new samples in the replay buffer
             if self.local_replay_buffer is not None:
                 self.local_replay_buffer.add(batch)
-
+        '''
         if self.local_replay_buffer is not None:
             # Update target network every `target_network_update_freq` sample steps.
             cur_ts = self._counters[
@@ -317,8 +317,9 @@ class AlphaZero(Algorithm):
                 )
             else:
                 train_batch = None
-        else:
-            train_batch = concat_samples(new_sample_batches)
+        else:'''
+        
+        train_batch = concat_samples(new_sample_batches)
 
         # Learn on the training batch.
         # Use simple optimizer (only for multi-agent or tf-eager; all other
