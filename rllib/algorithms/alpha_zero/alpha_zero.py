@@ -124,6 +124,16 @@ class AlphaZeroConfig(AlgorithmConfig):
             "argmax_tree_policy": False,
             "add_dirichlet_noise": True,
         }
+        
+        self.ranked_rewards = {
+            "enable": True,
+            "percentile": 75,
+            "buffer_max_length": 1000,
+            # add rewards obtained from random policy to
+            # "warm start" the buffer
+            "initialize_buffer": True,
+            "num_init_rewards": 100,
+        }
 
         # Override some of AlgorithmConfig's default values with AlphaZero-specific
         # values.
@@ -168,6 +178,7 @@ class AlphaZeroConfig(AlgorithmConfig):
         vf_clip_param: Optional[int] = NotProvided,
         vf_loss_coeff: Optional[float] = NotProvided,
         mcts_config: Optional[dict] = NotProvided,
+        ranked_rewards: Optional[dict] = NotProvided,
         num_steps_sampled_before_learning_starts: Optional[int] = NotProvided,
         **kwargs,
     ) -> "AlphaZeroConfig":
@@ -248,6 +259,9 @@ class AlphaZeroConfig(AlgorithmConfig):
             self.vf_clip_param = vf_clip_param
         if vf_loss_coeff is not NotProvided:
             self.vf_coeff = vf_loss_coeff
+        if ranked_rewards is not NotProvided:
+            self.ranked_rewards.update(ranked_rewards)    
+        
         
         if num_steps_sampled_before_learning_starts is not NotProvided:
             self.num_steps_sampled_before_learning_starts = (
@@ -259,6 +273,10 @@ class AlphaZeroConfig(AlgorithmConfig):
     @override(AlgorithmConfig)
     def update_from_dict(self, config_dict) -> "AlphaZeroConfig":
         config_dict = config_dict.copy()
+        
+        if "ranked_rewards" in config_dict:
+            value = config_dict.pop("ranked_rewards")
+            self.training(ranked_rewards=value)
 
         return super().update_from_dict(config_dict)
 
