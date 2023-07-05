@@ -1,7 +1,7 @@
 from copy import deepcopy
 
 import numpy as np
-
+import gymnasium as gym
 
 class RankedRewardsBuffer:
     def __init__(self, buffer_max_length, percentile):
@@ -31,7 +31,7 @@ class RankedRewardsBuffer:
 
 
 def get_r2_env_wrapper(env_creator, r2_config : dict):
-    class RankedRewardsEnvWrapper:
+    class RankedRewardsEnvWrapper(gym.Env):
         def __init__(self, env_config):
             self.env = env_creator(env_config)
             self.action_space = self.env.action_space
