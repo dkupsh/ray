@@ -34,6 +34,8 @@ class Node:
         self.obs = obs
 
         self.mcts : MCTS = mcts
+        
+        self.mcts.nodes_expanded += 1
 
     @property
     def number_visits(self):
@@ -93,6 +95,7 @@ class Node:
             obs, reward, terminated, truncated, info = self.env.step(action)
                 
             next_state = self.env.get_state()
+            
             self.children[action] = Node(
                 state=next_state,
                 action_list=self.action_list + [action],
@@ -103,7 +106,6 @@ class Node:
                 obs=obs,
                 mcts=self.mcts,
             )
-            self.mcts.nodes_expanded += 1
             
         return self.children[action]
 

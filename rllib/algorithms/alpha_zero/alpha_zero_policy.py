@@ -52,7 +52,7 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         _, env_creator = Algorithm._get_env_id_and_creator(config["env"], config)
         
         if self.config['ranked_rewards'].get('enabled', True):
-            self.env = get_r2_env_wrapper(env_creator(config['env_config']), self.config['ranked_rewards'])
+            self.env = get_r2_env_wrapper(env_creator, self.config['ranked_rewards'])(config['env_config'])
         else:
             self.env = env_creator(config['env_config'])
         
@@ -88,27 +88,17 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         dist_class: Type[TorchDistributionWrapper],
         train_batch: SampleBatch,
     ) -> Union[TensorType, List[TensorType]]:
-        
         input_dict = restore_original_dimensions(
             train_batch["obs"], self.observation_space, "torch"
         )
         
         # get inputs unflattened inputs
-        model_out, _ = model(input_dict, None, [1])
-        logits = torch.squeeze(model_out)
-        priors = nn.Softmax(dim=-1)(logits)
-        
-        '''
-        action_dist = dist_class(model_out, model)
-        actions = train_batch[SampleBatch.ACTIONS]
-        logprobs = action_dist.logp(actions)
-        '''
-        if priors.shape != train_batch["mcts_policies"].shape:
-            raise ValueError("logprobs and mcts_policies must have the same shape", priors.shape, train_batch["mcts_policies"].shape)
+        logits, _ = model(input_dict, None, [])
+        priors = nn.LogSoftmax(dim=-1)(torch.squeeze(logits))
         
         # Compute Policy Loss
         policy_loss = torch.mean(
-            -torch.sum(train_batch["mcts_policies"] * torch.log(priors), dim=-1)
+            -torch.sum(train_batch["mcts_policies"] * priors, dim=-1)
         )
         
         # Compute Value Loss
@@ -116,6 +106,7 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
         value_loss = torch.pow(
             value_fn_out - train_batch[Postprocessing.VALUE_TARGETS], 2.0
         )
+        
         if "vf_clip_param" in self.config:
             value_loss = torch.clamp(value_loss, 0, self.config["vf_clip_param"])
         value_loss = torch.mean(value_loss)
@@ -185,59 +176,18 @@ class AlphaZeroPolicy(ValueNetworkMixin, LearningRateSchedule, TorchPolicyV2):
                 return self._compute_action_helper(actions, input_dict, episodes[0])
             else:
                 raise ValueError("MCTS Policy can only handle one episode at a time")
-            
-            actions = []
-            for i, episode in enumerate(episodes):
-                if episode.length == 0:
-                    env_state = episode.user_data["initial_state"]
-                    
-                    # create tree root node
-                    obs = self.env.set_state(env_state)
-                    tree_node = Node(
-                        state=env_state,
-                        obs=obs,
-                        reward=0,
-                        done=False,
-                        action=None,
-                        parent=RootParentNode(env=self.env),
-                        mcts=self.mcts,
-                    )
-                else:
-                    # otherwise get last root node from previous time step
-                    tree_node = episode.user_data["tree_node"]
 
-                # run monte carlo simulations to compute the actions
-                # and record the tree
-                mcts_policy, action, tree_node = self.mcts.compute_action(tree_node)
-                # record action
-                actions.append(action)
-                # store new node
-                episode.user_data["tree_node"] = tree_node
-
-                # store mcts policies vectors and current tree root node
-                if episode.length == 0:
-                    episode.user_data["mcts_policies"] = [mcts_policy]
-                else:
-                    episode.user_data["mcts_policies"].append(mcts_policy)
-            
-            extra_fetches = self.extra_action_out(
-                input_dict, kwargs.get("state_batches", []), self.model, None
-            )
-
-            return (
-                np.array(actions),
-                [],
-                convert_to_numpy(extra_fetches),
-            )
-    
     def _compute_action_helper(self, prior_actions, input_dict, episode=None, **kwargs):
+        pre_expansions = self.mcts.nodes_expanded
         node = self.mcts.get_node(prior_actions)
         mcts_policy, action = self.mcts.compute_action(node)
+        num_expansions = self.mcts.nodes_expanded - pre_expansions
         
         extra_fetches = self.extra_action_out(
             input_dict, kwargs.get("state_batches", []), self.model, None
         )
         extra_fetches["mcts_policies"] = mcts_policy
+        #extra_fetches['num_expansions'] = np.array(num_expansions)
         
         if episode is not None:
             episode.user_data["actions"] = prior_actions + [action]
