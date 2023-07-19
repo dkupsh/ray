@@ -396,6 +396,11 @@ class PPO(Algorithm):
     @override(Algorithm)
     def get_default_config(cls) -> AlgorithmConfig:
         return PPOConfig()
+    
+    @override(Algorithm)
+    def reset_config(self, new_config) -> None:
+        self.config = self.config.update_from_dict(new_config)
+        self.config.validate()
 
     @classmethod
     @override(Algorithm)
