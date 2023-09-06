@@ -1,5 +1,5 @@
 import gymnasium as gym
-from gymnasium.spaces import Tuple, Dict
+from gymnasium.spaces import Tuple, Dict, Graph
 import numpy as np
 from ray.rllib.utils.annotations import DeveloperAPI
 import tree  # pip install dm_tree
@@ -76,6 +76,7 @@ def get_base_struct_from_space(space):
         >>> }))
         >>> # Will return: dict(a=Box(), b=tuple(Discrete(2), Discrete(3)))
     """
+    
 
     def _helper_struct(space_):
         if isinstance(space_, Tuple):
@@ -84,7 +85,6 @@ def get_base_struct_from_space(space):
             return {k: _helper_struct(space_[k]) for k in space_.spaces}
         else:
             return space_
-
     return _helper_struct(space)
 
 
@@ -115,14 +115,39 @@ def get_dummy_batch_for_space(
             if None, ignore this setting and return [B x ...].
 
     Returns:
-        The dummy batch of size `bqtch_size` matching the given space.
+        The dummy batch of size `batch_size` matching the given space.
     """
+    
     # Complex spaces. Perform recursive calls of this function.
-    if isinstance(space, (gym.spaces.Dict, gym.spaces.Tuple)):
+    if isinstance(space, (Dict, Tuple)):
         return tree.map_structure(
             lambda s: get_dummy_batch_for_space(s, batch_size, fill_value),
             get_base_struct_from_space(space),
         )
+    elif isinstance(space, Graph):
+        def get_nodes(num_nodes):
+            return np.concatenate([get_dummy_batch_for_space(space.node_space, 1, fill_value) for _ in range(num_nodes)])
+        def get_edges(num_edges):
+            return np.concatenate([get_dummy_batch_for_space(space.edge_space, 1, fill_value) for _ in range(num_edges)])
+        
+        
+        def get_edge_links(num_nodes, num_edges):
+            if fill_value == "random":
+                return space.np_random.integers(
+                    low=0, high=num_nodes, size=(num_edges, 2), dtype=space.dtype
+                )
+            return np.full(
+                shape=(num_edges, 2), fill_value=fill_value, dtype=space.dtype
+            )
+        
+        num_nodes, num_edges = 2, 1
+        nodes = np.array([get_nodes(num_nodes) for _ in range(batch_size)])
+        edges = np.array([get_edges(num_edges) for _ in range(batch_size)])
+        edge_links = np.array([get_edge_links(num_nodes, num_edges) for _ in range(batch_size)])
+
+        return (nodes, edges, edge_links)
+        
+        
     # Primivite spaces: Box, Discrete, MultiDiscrete.
     # Random values: Use gym's sample() method.
     elif fill_value == "random":

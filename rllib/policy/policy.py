@@ -1406,6 +1406,7 @@ class Policy(metaclass=ABCMeta):
             sample_batch_size
         )
         self._lazy_tensor_dict(self._dummy_batch)
+        
         # With RL modules you want the explore flag to be True for initialization of the
         # tensors and placeholder you'd need for training.
         explore = self.config.get("_enable_rl_module_api", False)
