@@ -125,26 +125,22 @@ def get_dummy_batch_for_space(
             get_base_struct_from_space(space),
         )
     elif isinstance(space, Graph):
+        # Helper Functions to get nodes/edges
         def get_nodes(num_nodes):
             return np.concatenate([get_dummy_batch_for_space(space.node_space, 1, fill_value) for _ in range(num_nodes)])
         def get_edges(num_edges):
             return np.concatenate([get_dummy_batch_for_space(space.edge_space, 1, fill_value) for _ in range(num_edges)])
         
-        
-        def get_edge_links(num_nodes, num_edges):
-            if fill_value == "random":
-                return space.np_random.integers(
-                    low=0, high=num_nodes, size=(num_edges, 2), dtype=space.dtype
-                )
-            return np.full(
-                shape=(num_edges, 2), fill_value=fill_value, dtype=space.dtype
+        # Helper Function to get edge links for batch
+        def get_edge_links(nodes, edges, batch):
+            return space.np_random.integers(
+                low=0, high=nodes[batch].shape[0], size=(edges[batch].shape[0], 2), dtype=np.int64
             )
+            
+        nodes = [get_nodes(np.random.randint(low=5, high=15)) for _ in range(batch_size)]
+        edges = [get_edges(np.random.randint(low=3, high=10)) for _ in range(batch_size)]
+        edge_links = [get_edge_links(nodes, edges, i) for i in range(batch_size)]
         
-        num_nodes, num_edges = 2, 1
-        nodes = np.array([get_nodes(num_nodes) for _ in range(batch_size)])
-        edges = np.array([get_edges(num_edges) for _ in range(batch_size)])
-        edge_links = np.array([get_edge_links(num_nodes, num_edges) for _ in range(batch_size)])
-
         return (nodes, edges, edge_links)
         
         

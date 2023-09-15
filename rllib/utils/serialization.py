@@ -134,6 +134,13 @@ def gym_space_to_dict(space: gym.spaces.Space) -> Dict:
             "space": "dict",
             "spaces": {k: gym_space_to_dict(sp) for k, sp in sp.spaces.items()},
         }
+        
+    def _graph(sp: gym.spaces.Graph) -> Dict:
+        return {
+            "space": "graph",
+            "node_space": gym_space_to_dict(sp.node_space),
+            "edge_space": gym_space_to_dict(sp.edge_space)
+        }
 
     def _simplex(sp: Simplex) -> Dict:
         return {
@@ -186,6 +193,8 @@ def gym_space_to_dict(space: gym.spaces.Space) -> Dict:
         return _tuple(space)
     elif isinstance(space, gym.spaces.Dict):
         return _dict(space)
+    elif isinstance(space, gym.spaces.Graph):
+        return _graph(space)
     elif isinstance(space, gym.spaces.Text):
         return _text(space)
     elif isinstance(space, Simplex):
@@ -270,6 +279,11 @@ def gym_space_from_dict(d: Dict) -> gym.spaces.Space:
     def _dict(d: Dict) -> gym.spaces.Discrete:
         spaces = {k: gym_space_from_dict(sp) for k, sp in d["spaces"].items()}
         return gym.spaces.Dict(spaces=spaces)
+    
+    def _graph(d: Dict) -> gym.spaces.Graph:
+        node_space = gym_space_from_dict(d["node_space"])
+        edge_space = gym_space_from_dict(d["edge_space"])
+        return gym.spaces.Graph(node_space=node_space, edge_space=edge_space)
 
     def _simplex(d: Dict) -> Simplex:
         return Simplex(**__common(d))
@@ -292,6 +306,7 @@ def gym_space_from_dict(d: Dict) -> gym.spaces.Space:
         "multi-discrete": _multi_discrete,
         "tuple": _tuple,
         "dict": _dict,
+        "graph": _graph,
         "simplex": _simplex,
         "repeated": _repeated,
         "flex_dict": _flex_dict,

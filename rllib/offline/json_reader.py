@@ -70,19 +70,36 @@ def _adjust_obs_actions_for_policy(json_data: dict, policy: Policy) -> dict:
                 json_data[k],
                 check_types=False,
             )
+        
+        
         # No preprocessing -> Process nested (leaf) observation(s).
         elif policy.config.get("_disable_preprocessor_api") and (
             k == SampleBatch.OBS
             or data_col == SampleBatch.OBS
             or k == SampleBatch.NEXT_OBS
             or data_col == SampleBatch.NEXT_OBS
-        ):
+        ):  
+            def to_numpy_array(item):
+                from gymnasium.spaces.graph import GraphInstance
+                if isinstance(item, list):
+                    if not isinstance(item[0], list):
+                        return np.array(item)
+                
+                    items = [to_numpy_array(i) for i in item]
+                    if all([isinstance(i, np.ndarray) for i in items]) and all([i.shape == items[0].shape for i in items]):
+                        return np.array(items)
+                    elif len(items) == 3:
+                        return GraphInstance(np.array(item[0]), np.array(item[1]), np.array(item[2]))
+                    else:
+                        return items
+                return np.array(item)
+        
             json_data[k] = tree.map_structure_up_to(
                 policy.observation_space_struct,
-                lambda comp: np.array(comp),
-                json_data[k],
-                check_types=False,
+                to_numpy_array,
+                json_data[k]
             )
+            
     return json_data
 
 

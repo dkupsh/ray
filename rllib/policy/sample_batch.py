@@ -7,6 +7,8 @@ import tree  # pip install dm_tree
 from typing import Dict, Iterator, List, Optional, Set, Union
 from numbers import Number
 
+from gymnasium.spaces.graph import GraphInstance
+
 from ray.util import log_once
 from ray.rllib.utils.annotations import DeveloperAPI, ExperimentalAPI, PublicAPI
 from ray.rllib.utils.compression import pack, unpack, is_compressed
@@ -639,7 +641,6 @@ class SampleBatch(dict):
                         break
                     elif state_start is None and count > start:
                         state_start = i
-
             return SampleBatch(
                 data,
                 seq_lens=seq_lens,
@@ -648,8 +649,24 @@ class SampleBatch(dict):
                 _num_grad_updates=self.num_grad_updates,
             )
         else:
+            def slice_structure(value, start, end):
+                if torch and torch.is_tensor(value):
+                    return value[start:end]
+                elif isinstance(value, np.ndarray):
+                    return value[start:end]
+                elif tf and tf.is_tensor(value):
+                    return value[start:end]
+                elif isinstance(value, list):
+                    return value[start:end]
+                elif isinstance(value, dict):
+                    return {k: slice_structure(v) for k, v in value.items()}
+                elif isinstance(value, tuple):
+                    return tuple(slice_structure(v) for v in value)
+                else:
+                    return value
+
             return SampleBatch(
-                tree.map_structure(lambda value: value[start:end], self),
+                slice_structure(self, start, end),
                 _is_training=self.is_training,
                 _time_major=self.time_major,
                 _num_grad_updates=self.num_grad_updates,
@@ -961,7 +978,7 @@ class SampleBatch(dict):
                         curr[p] = np.array([pack(o) for o in value])
                 curr = curr[p]
 
-        tree.map_structure_with_path(_compress_in_place, self)
+        #tree.map_structure_with_path(_compress_in_place, self)
 
         return self
 
@@ -992,7 +1009,7 @@ class SampleBatch(dict):
             elif len(value) > 0 and is_compressed(value[0]):
                 curr[path[-1]] = np.array([unpack(o) for o in value])
 
-        tree.map_structure_with_path(_decompress_in_place, self)
+        #tree.map_structure_with_path(_decompress_in_place, self)
 
         return self
 
@@ -1084,7 +1101,23 @@ class SampleBatch(dict):
                 _num_grad_updates=self.num_grad_updates,
             )
         else:
-            data = tree.map_structure(lambda value: value[start:stop], self)
+            def slice_structure(value, start, end):
+                if torch and torch.is_tensor(value):
+                    return value[start:end]
+                elif isinstance(value, np.ndarray):
+                    return value[start:end]
+                elif tf and tf.is_tensor(value):
+                    return value[start:end]
+                elif isinstance(value, list):
+                    return value[start:end]
+                elif isinstance(value, dict):
+                    return {k: slice_structure(v, start, end) for k, v in value.items()}
+                elif isinstance(value, tuple):
+                    return tuple(slice_structure(v, start, end) for v in value)
+                else:
+                    return value
+
+            data = slice_structure(self, start, stop) #tree.map_structure(lambda value: value[start:stop], self)
             return SampleBatch(
                 data,
                 _is_training=self.is_training,
@@ -1539,6 +1572,17 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
                     *[s[k] for s in concated_samples],
                     time_major=time_major,
                 )
+            elif k == SampleBatch.OBS or k == SampleBatch.NEXT_OBS or SampleBatch.CUR_OBS:
+                values_to_concat = [c[k] for c in concated_samples]
+                _concat_values_w_time = partial(_concat_values, time_major=time_major)
+                concatd_data[k] = _concat_values(
+                    *[s[k] for s in concated_samples],
+                    time_major=time_major,
+                )
+                
+                #concatd_data[k] = tree.map_structure(
+                #    _concat_values_w_time, *values_to_concat
+                #)                
             else:
                 values_to_concat = [c[k] for c in concated_samples]
                 _concat_values_w_time = partial(_concat_values, time_major=time_major)
@@ -1551,6 +1595,11 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
             raise e
         except Exception as e:
             # Other errors are likely due to mismatching sub-structures.
+            print([type(s[k]['dfg_graph']) for s in concated_samples])
+            print([len(s[k]['dfg_graph'][0]) for s in concated_samples])
+            
+            
+            
             raise ValueError(
                 f"Cannot concat data under key '{k}', b/c "
                 "sub-structures under that key don't match. "
@@ -1649,6 +1698,39 @@ def _concat_values(*values, time_major=None) -> TensorType:
         for sublist in values:
             concatenated_list.extend(sublist)
         return concatenated_list
+    elif isinstance(values[0], GraphInstance) or (isinstance(values[0], tuple) and len(values[0]) == 3):
+        if not all([isinstance(v, GraphInstance) or (isinstance(v, tuple) and len(v) == 3) for v in values]):
+            raise ValueError("All values must be of type GraphInstance")
+        
+        def concatenate_graph(index):
+            # Check if we can concatenate as np array
+            if all(isinstance(v[index], np.ndarray) for v in values):
+                if all(v[index].shape == values[0][index].shape for v in values):
+                    return np.concatenate([v[index] for v in values], axis=1 if time_major else 0)
+            
+            # Check if we can concatenate as torch tensor
+            elif torch and all(torch.is_tensor(v[index]) for v in values):
+                if all(v[index].shape == values[0][index].shape for v in values):
+                    return torch.cat([v[index] for v in values], dim=1 if time_major else 0)
+            
+            # Concatenate as list
+            data = [v[index] for v in values]
+            for i in range(len(data)):
+                if not isinstance(data[i], list):
+                    data[i] = list(data[i])
+            
+            concatenated_list = []
+            for sublist in data:
+                concatenated_list.extend(sublist)
+            return concatenated_list
+        return GraphInstance(concatenate_graph(0), concatenate_graph(1),  concatenate_graph(2))
+    elif isinstance(values[0], tuple):
+        return tuple(_concat_values(*[v[i] for v in values]) for i in range(len(values[0])))
+    elif isinstance(values[0], dict):
+        return {
+            k: _concat_values(*[v[k] for v in values], time_major=time_major)
+            for k in values[0].keys()
+        }
     else:
         raise ValueError(
             f"Unsupported type for concatenation: {type(values[0])} "
