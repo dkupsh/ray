@@ -92,6 +92,8 @@ def _adjust_obs_actions_for_policy(json_data: dict, policy: Policy) -> dict:
                         return GraphInstance(np.array(item[0]), np.array(item[1]), np.array(item[2]))
                     else:
                         return items
+                elif isinstance(item, GraphInstance):
+                    return GraphInstance(to_numpy_array(item[0]), to_numpy_array(item[1]), to_numpy_array(item[2]))                
                 return np.array(item)
         
             json_data[k] = tree.map_structure_up_to(
@@ -400,7 +402,7 @@ class JsonReader(InputReader):
             batch = self._from_json(line)
         except Exception:
             logger.exception(
-                "Ignoring corrupt json record in {}: {}".format(self.cur_file, line)
+                "Ignoring corrupt json record in {}".format(self.cur_file)
             )
             return None
 
