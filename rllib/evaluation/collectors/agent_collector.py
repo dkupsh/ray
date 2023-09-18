@@ -29,11 +29,28 @@ torch, _ = try_import_torch()
 
 
 def _to_float_np_array(v: List[Any]) -> np.ndarray:
+    def to_numpy_array(item):
+        from gymnasium.spaces.graph import GraphInstance
+        if isinstance(item, list):
+            if not isinstance(item[0], list):
+                return np.array(item, dtype=np.float32)
+        
+            items = [to_numpy_array(i) for i in item]
+            if all([isinstance(i, np.ndarray) for i in items]) and all([i.shape == items[0].shape for i in items]):
+                return np.array(items, dtype=np.float32)
+            elif len(items) == 3:
+                return GraphInstance(np.array(item[0]), np.array(item[1]), np.array(item[2]))
+            else:
+                return items
+        elif isinstance(item, GraphInstance):
+            return GraphInstance(to_numpy_array(item[0]), to_numpy_array(item[1]), to_numpy_array(item[2]))                
+        return np.array(item, dtype=np.float32)
+            
     if torch and torch.is_tensor(v[0]):
         raise ValueError
     arr = np.array(v) 
-    if arr.dtype == np.float64:
-        return arr.astype(np.float32)  # save some memory
+    #if arr.dtype == np.float64:
+    #    return arr.astype(np.float32)  # save some memory
     return arr
 
 

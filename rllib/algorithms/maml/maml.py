@@ -1,10 +1,11 @@
 import logging
-import numpy as np
 from typing import Optional, Type
+
+import numpy as np
 
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig, NotProvided
-from ray.rllib.evaluation.metrics import get_learner_stats
+from ray.rllib.evaluation.metrics import collect_metrics, get_learner_stats
 from ray.rllib.evaluation.worker_set import WorkerSet
 from ray.rllib.execution.common import (
     STEPS_SAMPLED_COUNTER,
@@ -12,22 +13,17 @@ from ray.rllib.execution.common import (
     STEPS_TRAINED_THIS_ITER_COUNTER,
     _get_shared_metrics,
 )
+from ray.rllib.execution.metric_ops import CollectMetrics
 from ray.rllib.policy.policy import Policy
 from ray.rllib.policy.sample_batch import (
     concat_samples,
     convert_ma_batch_to_sample_batch,
 )
-from ray.rllib.execution.metric_ops import CollectMetrics
-from ray.rllib.evaluation.metrics import collect_metrics
 from ray.rllib.utils.annotations import override
-from ray.rllib.utils.deprecation import (
-    DEPRECATED_VALUE,
-    Deprecated,
-    ALGO_DEPRECATION_WARNING,
-)
+from ray.rllib.utils.deprecation import DEPRECATED_VALUE
 from ray.rllib.utils.metrics.learner_info import LEARNER_INFO
 from ray.rllib.utils.sgd import standardized
-from ray.util.iter import from_actors, LocalIterator
+from ray.util.iter import LocalIterator, from_actors
 
 logger = logging.getLogger(__name__)
 
@@ -294,12 +290,6 @@ def inner_adaptation(workers, samples):
         e.learn_on_batch.remote(samples[i])
 
 
-@Deprecated(
-    old="rllib/algorithms/maml/",
-    new="rllib_contrib/maml/",
-    help=ALGO_DEPRECATION_WARNING,
-    error=False,
-)
 class MAML(Algorithm):
     @classmethod
     @override(Algorithm)
@@ -356,7 +346,6 @@ class MAML(Algorithm):
             split = []
             metrics = {}
             for samples in itr:
-
                 # Processing Samples (Standardize Advantages)
                 split_lst = []
                 for sample in samples:
