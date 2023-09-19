@@ -756,6 +756,13 @@ class TorchPolicyV2(Policy):
         # 3) Load splits into the given buffer (consisting of n GPUs).
         slices = [slice.to_device(self.devices[i]) for i, slice in enumerate(slices)]
         self._loaded_batches[buffer_index] = slices
+        
+        try:
+            return len(slices[0])
+        except:
+            print("Error in load_batch_into_buffer")
+            print("slices: ", type(slices))
+            return 0
 
         # Return loaded samples per-device.
         return len(slices[0])
