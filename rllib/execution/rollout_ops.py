@@ -82,13 +82,12 @@ def synchronous_parallel_sample(
             sample_batches = [worker_set.local_worker().sample()]
         # Loop over remote workers' `sample()` method in parallel.
         else:
-            sample_batches = worker_set.foreach_worker(
-                lambda w: w.sample(), local_worker=False, healthy_only=True
-            )
-            if worker_set.num_healthy_remote_workers() <= 0:
-                # There is no point staying in this loop, since we will not be able to
-                # get any new samples if we don't have any healthy remote workers left.
-                break
+            if worker_set.num_healthy_remote_workers() > 0:
+                sample_batches = worker_set.foreach_worker(
+                    lambda w: w.sample(), local_worker=False, healthy_only=True
+                )
+            else:
+                sample_batches = [worker_set.local_worker().sample()]
         # Update our counters for the stopping criterion of the while loop.
         for b in sample_batches:
             if max_agent_steps:
