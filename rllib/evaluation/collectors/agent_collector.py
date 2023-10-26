@@ -30,25 +30,23 @@ torch, _ = try_import_torch()
 
 def _to_float_np_array(v: List[Any]) -> np.ndarray:
     def to_numpy_array(item):
-        from gymnasium.spaces.graph import GraphInstance
         if isinstance(item, list):
-            if not isinstance(item[0], list):
-                return np.array(item, dtype=np.float32)
-        
+            if not isinstance(item[0], list) and not isinstance(item[0], np.ndarray):
+                return np.array(item)
             items = [to_numpy_array(i) for i in item]
             if all([isinstance(i, np.ndarray) for i in items]) and all([i.shape == items[0].shape for i in items]):
-                return np.array(items, dtype=np.float32)
-            elif len(items) == 3:
-                return GraphInstance(np.array(item[0]), np.array(item[1]), np.array(item[2]))
+                return np.array(items)
             else:
-                return items
-        elif isinstance(item, GraphInstance):
-            return GraphInstance(to_numpy_array(item[0]), to_numpy_array(item[1]), to_numpy_array(item[2]))                
-        return np.array(item, dtype=np.float32)
+                return np.array(items, dtype=object)
+        elif isinstance(item, tuple) and len(item) == 3:
+            return np.array([to_numpy_array(item[0]), to_numpy_array(item[1]), to_numpy_array(item[2])])              
+        
+        
+        return np.array(item)
             
     if torch and torch.is_tensor(v[0]):
         raise ValueError
-    arr = np.array(v) 
+    arr = to_numpy_array(v)
     #if arr.dtype == np.float64:
     #    return arr.astype(np.float32)  # save some memory
     return arr
@@ -445,6 +443,7 @@ class AgentCollector:
             # Go through each time-step in the buffer and construct the view
             # accordingly.
             data = []
+            from gymnasium.spaces.graph import GraphInstance
             for d in np_data[data_col]:
                 shifted_data = []
 
@@ -474,6 +473,7 @@ class AgentCollector:
                         / view_req.batch_repeat_value
                     )
                 )
+                
                 for i in range(count):
                     # the indices for time step t
                     inds = (
@@ -489,7 +489,17 @@ class AgentCollector:
                     # Create padding first time we encounter data
                     if max(inds) < len(d):
                         # Simple case where we can simply pick slices from buffer
+                       
                         element_at_t = d[inds]
+                        '''
+                        elif isinstance(d, list):
+                            element_at_t = [d[i] for i in inds]
+                        elif isinstance(d, GraphInstance):
+                            nodes = [d[0][i] for i in inds]
+                            edges = [d[1][i] for i in inds]
+                            edge_links = [d[2][i] for i in inds]
+                            element_at_t = GraphInstance(nodes=nodes, edges=edges, edge_links=edge_links)
+                        '''
                     else:
                         # Case in which we have to pad because buffer has insufficient
                         # length. This branch takes more time than simply picking
@@ -497,15 +507,43 @@ class AgentCollector:
                         element_at_t = _get_buffered_slice_with_paddings(d, inds)
                         element_at_t = np.stack(element_at_t)
 
-                    if element_at_t.shape[0] == 1:
-                        # Remove the T dimension if it is 1.
+                    
+                    if len(element_at_t) == 1:
                         element_at_t = element_at_t[0]
+                    
+                    '''
+                    if isinstance(element_at_t, list) or isinstance(element_at_t, np.ndarray):
+                        if len(element_at_t) == 1:
+                            # Remove the T dimension if it is 1.
+                            element_at_t = element_at_t[0]
+                    elif isinstance(element_at_t, GraphInstance):
+                        if len(element_at_t[0]) == 1:
+                            element_at_t = GraphInstance(element_at_t[0][0], element_at_t[1][0], element_at_t[2][0])
+                    '''
                     shifted_data.append(element_at_t)
 
                 # in some multi-agent cases shifted_data may be an empty list.
                 # In this case we should just create an empty array and return it.
+                '''
+                lengths = []
+                for d in shifted_data:
+                    if isinstance(d, np.ndarray):
+                        lengths.append(d.shape)
+                    elif isinstance(d, list):
+                        lengths.append(len(d))
+                    else:
+                        lengths.append((type(d), d))
+                print('shifted_data', lengths)
+                '''
+                
                 if shifted_data:
-                    shifted_data_np = np.stack(shifted_data, 0)
+                    if isinstance(shifted_data[0], np.ndarray):
+                        if all(shifted_data[0].shape == d.shape for d in shifted_data):
+                            shifted_data_np = np.stack(shifted_data, 0)
+                        else:
+                            shifted_data_np = np.array(shifted_data, dtype=object)
+                    else:
+                        shifted_data_np = np.stack(shifted_data, 0)
                 else:
                     shifted_data_np = np.array(shifted_data)
                 data.append(shifted_data_np)

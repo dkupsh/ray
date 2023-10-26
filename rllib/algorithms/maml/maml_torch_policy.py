@@ -172,6 +172,7 @@ class MAMLLoss(object):
         self.entropy_coeff = entropy_coeff
 
         # Split episode tensors into [inner_adaptation_steps+1, num_tasks, -1]
+        
         self.obs = self.split_placeholders(obs, split)
         self.actions = self.split_placeholders(actions, split)
         self.behaviour_logits = self.split_placeholders(behaviour_logits, split)
@@ -186,7 +187,39 @@ class MAMLLoss(object):
         entropy_losses = []
         meta_losses = []
         kls = []
+        
+        def check_contains_nan(batch):
+            import numpy as np
+            if isinstance(batch, dict):
+                for key in batch.keys():
+                    check_contains_nan(batch[key])
+            elif isinstance(batch, list):
+                for item in batch:
+                    check_contains_nan(item)
+            elif isinstance(batch, tuple):
+                for item in batch:
+                    check_contains_nan(item)
+            elif isinstance(batch, torch.Tensor):
+                if torch.any(torch.isnan(batch)):
+                    raise ValueError("Batch contains NaN values")
+            elif isinstance(batch, np.ndarray):
+                if batch.dtype == object:
+                    for item in batch:
+                        check_contains_nan(item)
+                elif np.any(np.isnan(batch)):
+                    raise ValueError("Batch contains NaN values")
+            elif isinstance(batch, int):
+                pass
+            elif isinstance(batch, float):
+                if np.isnan(batch):
+                    raise ValueError("Batch contains NaN values")
+            elif isinstance(batch, str):
+                pass
+            else:
+                raise ValueError("Batch is not a dict, list, tuple or torch.Tensor", type(batch))
 
+        check_contains_nan(self.obs)
+        
         meta_opt.zero_grad()
         for i in range(self.num_tasks):
             with higher.innerloop_ctx(model, inner_opt, copy_initial_weights=False) as (
@@ -201,7 +234,7 @@ class MAMLLoss(object):
                     diffopt.step(ppo_loss)
                     inner_kls.append(inner_kl_loss)
                     kls.append(inner_kl_loss.detach())
-
+                
                 # Meta Update
                 ppo_loss, s_loss, kl_loss, v_loss, ent = self.compute_losses(
                     fnet, self.inner_adaptation_steps - 1, i, clip_loss=True
@@ -246,7 +279,43 @@ class MAMLLoss(object):
     def compute_losses(self, model, inner_adapt_iter, task_iter, clip_loss=False):
         obs = self.obs[inner_adapt_iter][task_iter]
         obs_dict = {"obs": obs, "obs_flat": obs}
+        
+        def check_contains_nan(batch):
+            import numpy as np
+            if isinstance(batch, dict):
+                for key in batch.keys():
+                    check_contains_nan(batch[key])
+            elif isinstance(batch, list):
+                for item in batch:
+                    check_contains_nan(item)
+            elif isinstance(batch, tuple):
+                for item in batch:
+                    check_contains_nan(item)
+            elif isinstance(batch, torch.Tensor):
+                if torch.any(torch.isnan(batch)):
+                    raise ValueError("Batch contains NaN values")
+            elif isinstance(batch, np.ndarray):
+                if batch.dtype == object:
+                    for item in batch:
+                        check_contains_nan(item)
+                elif np.any(np.isnan(batch)):
+                    raise ValueError("Batch contains NaN values")
+            elif isinstance(batch, int):
+                pass
+            elif isinstance(batch, float):
+                if np.isnan(batch):
+                    raise ValueError("Batch contains NaN values")
+            elif isinstance(batch, str):
+                pass
+            else:
+                raise ValueError("Batch is not a dict, list, tuple or torch.Tensor", type(batch))
+            
+        check_contains_nan(batch=obs_dict)
+        
         curr_logits, _ = model.forward(obs_dict, None, None)
+        
+        check_contains_nan(batch=curr_logits)
+        
         value_fns = model.value_function()
         ppo_loss, surr_loss, kl_loss, val_loss, ent_loss = PPOLoss(
             dist_class=self.dist_class,
@@ -267,17 +336,73 @@ class MAMLLoss(object):
         return ppo_loss, surr_loss, kl_loss, val_loss, ent_loss
 
     def split_placeholders(self, placeholder, split):
-        inner_placeholder_list = torch.split(
-            placeholder, torch.sum(split, dim=1).tolist(), dim=0
-        )
+        inner_placeholder_list = self._split_helper(placeholder, torch.sum(split, dim=1).tolist())
+        
         placeholder_list = []
         for index, split_placeholder in enumerate(inner_placeholder_list):
             placeholder_list.append(
-                torch.split(split_placeholder, split[index].tolist(), dim=0)
+                self._split_helper(split_placeholder, split[index].tolist())
             )
         return placeholder_list
-
-
+    
+    
+    def _split_helper(self, function, split):
+        from gymnasium.spaces.graph import GraphInstance
+        
+        def _split_dictionary(dictionary, split):
+            
+            dictionary_list = []
+            for _ in range(len(split)):
+                dictionary_list.append({})
+            
+            key_values = {}
+            
+            for key in dictionary.keys():
+                inner_dictionary_list = self._split_helper(
+                    dictionary[key], split
+                )
+                
+                key_values[key] = inner_dictionary_list
+                
+                for i, inner in enumerate(inner_dictionary_list):
+                    dictionary_list[i][key] = inner
+            
+            return dictionary_list
+        
+        def _split_graph(graph, split):
+            assert isinstance(graph, GraphInstance) or len(graph) == 3
+            
+            nodes = self._split_helper(graph[0], split)
+            edges = self._split_helper(graph[1], split)
+            edge_indices = self._split_helper(graph[2], split)
+                
+            return [GraphInstance(nodes[i], edges[i], edge_indices[i]) for i in range(len(split))]
+            
+        def _split_list(list, split):
+            list_list = [[]] * len(split)
+            
+            assert len(list) == sum(split), f"List length {len(list)} does not match sum of split {sum(split)} split={split}"
+            
+            prev_split_size = 0
+            
+            for i, size in enumerate(split):
+                list_list[i] = list[prev_split_size:size+prev_split_size]
+                prev_split_size += size
+            
+            for i in range(len(list_list)):
+                assert len(list_list[i]) == split[i], f"List length {len(list_list[i])} does not match split {split[i]} i={i}, list={[len(list_list[i]) for i in range(len(list_list))]}, split={split}"
+            
+            return list_list
+        
+        if isinstance(function, dict):
+            return _split_dictionary(function, split)
+        elif isinstance(function, GraphInstance) or (isinstance(function, tuple) and len(function) == 3):
+            return _split_graph(function, split)
+        elif isinstance(function, list):
+            return _split_list(function, split)
+        else:
+            return torch.split(function, split, dim=0)
+        
 class KLCoeffMixin:
     def __init__(self, config):
         self.kl_coeff_val = (
@@ -324,6 +449,21 @@ class MAMLTorchPolicy(ValueNetworkMixin, KLCoeffMixin, TorchPolicyV2):
         dist_class: Type[TorchDistributionWrapper],
         train_batch: SampleBatch,
     ) -> Union[TensorType, List[TensorType]]:
+        
+        def check_contains_nan(batch):
+            if isinstance(batch, dict):
+                for key in batch.keys():
+                    check_contains_nan(batch[key])
+            elif isinstance(batch, list):
+                for item in batch:
+                    check_contains_nan(item)
+            elif isinstance(batch, tuple):
+                for item in batch:
+                    check_contains_nan(item)
+            elif isinstance(batch, torch.Tensor):
+                assert torch.any(torch.isnan(batch)) == False, f"Batch contains NaN values"
+        
+        
         """Constructs the loss function.
 
         Args:
@@ -334,6 +474,7 @@ class MAMLTorchPolicy(ValueNetworkMixin, KLCoeffMixin, TorchPolicyV2):
         Returns:
             The PPO loss tensor given the input batch.
         """
+        check_contains_nan(train_batch)
         logits, state = model(train_batch)
         self.cur_lr = self.config["lr"]
 
@@ -367,10 +508,23 @@ class MAMLTorchPolicy(ValueNetworkMixin, KLCoeffMixin, TorchPolicyV2):
                     self.config["inner_adaptation_steps"],
                     self.config["num_workers"],
                 )
+                
+                def get_batch_size(obs):
+                    if isinstance(obs, dict):
+                        return get_batch_size(obs[list(obs.keys())[0]])
+                    elif isinstance(obs, tuple):
+                        return get_batch_size(obs[0])
+                    return len(obs)
+                
+                batch_size = get_batch_size(train_batch["obs"])
+                
                 split_const = int(
-                    1 #train_batch["obs"].shape[0] // (split_shape[0] * split_shape[1])
+                    batch_size // (split_shape[0] * split_shape[1])
                 )
                 split = torch.ones(split_shape, dtype=int) * split_const
+                
+                assert torch.sum(split).item() == batch_size, f"Split {split} does not match batch size {batch_size} with size {torch.sum(split).item()}"
+            
             self.loss_obj = MAMLLoss(
                 model=model,
                 dist_class=dist_class,

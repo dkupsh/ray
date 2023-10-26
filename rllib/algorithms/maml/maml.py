@@ -342,6 +342,13 @@ class MAML(Algorithm):
         inner_steps = config.inner_adaptation_steps
 
         def inner_adaptation_steps(itr):
+            def get_batch_size(obs):
+                if isinstance(obs, dict):
+                    return get_batch_size(obs[list(obs.keys())[0]])
+                if isinstance(obs, tuple):
+                    return get_batch_size(obs[0])
+                return len(obs)
+
             buf = []
             split = []
             metrics = {}
@@ -351,7 +358,9 @@ class MAML(Algorithm):
                 for sample in samples:
                     sample = convert_ma_batch_to_sample_batch(sample)
                     sample["advantages"] = standardized(sample["advantages"])
-                    split_lst.append(sample.count)
+                    
+                    total_samples_in_batch = get_batch_size(sample["obs"])
+                    split_lst.append(total_samples_in_batch)
                     buf.append(sample)
 
                 split.append(split_lst)
@@ -361,6 +370,7 @@ class MAML(Algorithm):
                 if len(split) > inner_steps:
                     out = concat_samples(buf)
                     out["split"] = np.array(split)
+                    
                     buf = []
                     split = []
 
