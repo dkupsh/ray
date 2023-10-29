@@ -6,7 +6,7 @@ from typing import Dict, List, Optional, TYPE_CHECKING, Union
 import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
-from gymnasium.spaces import Discrete, MultiDiscrete
+from gymnasium.spaces import Discrete, MultiDiscrete, GraphInstance
 from packaging import version
 
 import ray
@@ -219,7 +219,46 @@ def convert_to_torch_tensor(x: TensorStructType, device: Optional[str] = None):
             values converted to torch Tensor types. This does not convert possibly
             nested elements that are None because torch has no representation for that.
     """
-
+    
+    def convert_to_tensor(item):
+        if torch.is_tensor(item):
+            return item
+        elif isinstance(item, np.ndarray):
+            # Object type (e.g. info dicts in train batch): leave as-is.
+            # str type (e.g. agent_id in train batch): leave as-is.
+            if item.dtype == object or item.dtype is np.str_:
+                return item
+            # Non-writable numpy-arrays will cause PyTorch warning.
+            elif item.flags.writeable is False:
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    return torch.from_numpy(item)
+            # Already numpy: Wrap as torch tensor.
+            else:
+                return torch.from_numpy(item)
+        elif isinstance(item, list):
+            return torch.from_numpy(np.asarray(item), device)
+            #return [convert_to_torch_tensor(i, device) for i in item]
+        elif isinstance(item, GraphInstance) or (isinstance(item, tuple) and len(item) == 3):
+            nodes = [convert_to_torch_tensor(i, device) for i in item[0]]
+            edges = [convert_to_torch_tensor(i, device) for i in item[1]]
+            edge_index = [convert_to_torch_tensor(i, device) for i in item[2]]
+            
+            return GraphInstance(nodes, edges, edge_index)
+        elif isinstance(item, dict):
+            new_dict = {}
+            for key in item.keys():
+                new_dict[key] = convert_to_torch_tensor(item[key], device)
+            return new_dict
+        elif isinstance(item, tuple):
+            return tuple(convert_to_torch_tensor(i, device) for i in item)
+        elif isinstance(item, int) or isinstance(item, float):
+            return torch.tensor(item)
+        else:
+            raise ValueError("Cannot convert to torch tensor: {}".format(type(item)))
+            
+    
+    '''
     def mapping(item):
         if item is None:
             # Torch has no representation for `None`, so we return None
@@ -252,6 +291,11 @@ def convert_to_torch_tensor(x: TensorStructType, device: Optional[str] = None):
         elif isinstance(item, list):
             return [convert_to_torch_tensor(np.array(i), device) for i in item]
         # Everything else: Convert to numpy, then wrap as torch tensor.
+        elif isinstance(item, GraphInstance):
+            if isinstance(item[0], list):
+                tensor = GraphInstance(convert_to_torch_tensor(item[0]), convert_to_torch_tensor(item[1]), convert_to_torch_tensor(item[2]))
+            else:
+                tensor = GraphInstance(convert_to_torch_tensor(item[0].tolist()), convert_to_torch_tensor(item[1].tolist()), convert_to_torch_tensor(item[2].tolist()))
         else:
             tensor = torch.from_numpy(np.asarray(item))
 
@@ -260,8 +304,8 @@ def convert_to_torch_tensor(x: TensorStructType, device: Optional[str] = None):
             tensor = tensor.float()
 
         return tensor if device is None else tensor.to(device)
-
-    return tree.map_structure(mapping, x)
+    '''
+    return convert_to_tensor(x)
 
 
 @PublicAPI

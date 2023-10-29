@@ -80,7 +80,6 @@ class PPOTorchPolicy(
         Returns:
             The PPO loss tensor given the input batch.
         """
-
         logits, state = model(train_batch)
         curr_action_dist = dist_class(logits, model)
 
