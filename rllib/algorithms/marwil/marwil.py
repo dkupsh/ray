@@ -1,4 +1,4 @@
-from typing import Callable, Optional, Type, Union
+from typing import List, Callable, Optional, Type, Union
 
 from ray.rllib.algorithms.algorithm import Algorithm
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig, NotProvided
@@ -10,6 +10,7 @@ from ray.rllib.execution.train_ops import (
     train_one_step,
 )
 from ray.rllib.policy.policy import Policy
+from ray.rllib.utils.schedules.schedule import Schedule
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.deprecation import deprecation_warning
 from ray.rllib.utils.metrics import (
@@ -114,6 +115,7 @@ class MARWILConfig(AlgorithmConfig):
     def training(
         self,
         *,
+        lr_schedule: Optional[Union(List[List[Union[int, float]]], Schedule)] = NotProvided,
         beta: Optional[float] = NotProvided,
         bc_logstd_coeff: Optional[float] = NotProvided,
         moving_average_sqd_adv_norm_update_rate: Optional[float] = NotProvided,
@@ -146,6 +148,8 @@ class MARWILConfig(AlgorithmConfig):
         """
         # Pass kwargs onto super's `training()` method.
         super().training(**kwargs)
+        if lr_schedule is not NotProvided:
+            self.lr_schedule = lr_schedule
         if beta is not NotProvided:
             self.beta = beta
         if bc_logstd_coeff is not NotProvided:

@@ -5,7 +5,7 @@ from ray.rllib.evaluation.postprocessing import Postprocessing
 from ray.rllib.models.modelv2 import ModelV2
 from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
 from ray.rllib.policy.sample_batch import SampleBatch
-from ray.rllib.policy.torch_mixins import ValueNetworkMixin
+from ray.rllib.policy.torch_mixins import ValueNetworkMixin, LearningRateSchedule
 from ray.rllib.policy.torch_policy_v2 import TorchPolicyV2
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.framework import try_import_torch
@@ -16,7 +16,8 @@ from ray.rllib.utils.typing import TensorType
 torch, _ = try_import_torch()
 
 
-class MARWILTorchPolicy(ValueNetworkMixin, PostprocessAdvantages, TorchPolicyV2):
+class MARWILTorchPolicy(ValueNetworkMixin, PostprocessAdvantages, 
+    LearningRateSchedule, TorchPolicyV2):
     """PyTorch policy class used with Marwil."""
 
     def __init__(self, observation_space, action_space, config):
@@ -29,6 +30,7 @@ class MARWILTorchPolicy(ValueNetworkMixin, PostprocessAdvantages, TorchPolicyV2)
         )
 
         ValueNetworkMixin.__init__(self, config)
+        LearningRateSchedule.__init__(self, config["lr"], config["lr_schedule"])
         PostprocessAdvantages.__init__(self)
 
         # Not needed for pure BC.

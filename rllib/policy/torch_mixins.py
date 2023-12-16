@@ -3,6 +3,7 @@ from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy.torch_policy import TorchPolicy
 from ray.rllib.utils.annotations import DeveloperAPI, override
 from ray.rllib.utils.framework import try_import_torch
+from ray.rllib.utils.schedules.schedule import Schedule
 from ray.rllib.utils.schedules import PiecewiseSchedule
 
 torch, nn = try_import_torch()
@@ -20,9 +21,12 @@ class LearningRateSchedule:
         if lr_schedule is None:
             self.cur_lr = lr
         else:
-            self._lr_schedule = PiecewiseSchedule(
-                lr_schedule, outside_value=lr_schedule[-1][-1], framework=None
-            )
+            if isinstance(lr_schedule, Schedule):
+                self._lr_schedule = lr_schedule
+            else:
+                self._lr_schedule = PiecewiseSchedule(
+                    lr_schedule, outside_value=lr_schedule[-1][-1], framework=None
+                )
             self.cur_lr = self._lr_schedule.value(0)
 
     @override(Policy)

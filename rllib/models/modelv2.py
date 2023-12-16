@@ -254,38 +254,8 @@ class ModelV2:
                     restored["obs_flat"] = input_dict["obs"]
             except AttributeError:
                 restored["obs_flat"] = input_dict["obs"]
-
-        def check_contains_nan(batch):
-            if isinstance(batch, dict):
-                for key in batch.keys():
-                    check_contains_nan(batch[key])
-            elif isinstance(batch, list):
-                for item in batch:
-                    check_contains_nan(item)
-            elif isinstance(batch, tuple):
-                for item in batch:
-                    check_contains_nan(item)
-            elif isinstance(batch, torch.Tensor):
-                if torch.any(torch.isnan(batch)):
-                    raise ValueError("Batch contains NaN values")
-            elif isinstance(batch, np.ndarray):
-                if batch.dtype == object:
-                    for item in batch:
-                        check_contains_nan(item)
-                elif np.any(np.isnan(batch)):
-                    raise ValueError("Batch contains NaN values")
-            elif isinstance(batch, int):
-                pass
-            elif isinstance(batch, float):
-                if np.isnan(batch):
-                    raise ValueError("Batch contains NaN values")
-            elif isinstance(batch, str):
-                pass
-            else:
-                raise ValueError("Batch is not a dict, list, tuple or torch.Tensor", type(batch))
-            
+        
         with self.context():
-            check_contains_nan(restored)
             res = self.forward(restored, state or [], seq_lens)
 
         if isinstance(input_dict, SampleBatch):

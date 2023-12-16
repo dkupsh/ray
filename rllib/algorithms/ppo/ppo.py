@@ -47,6 +47,7 @@ from ray.rllib.utils.metrics import (
     ALL_MODULES,
 )
 from ray.rllib.utils.schedules.scheduler import Scheduler
+from ray.rllib.utils.schedules.schedule import Schedule
 from ray.rllib.utils.typing import ResultDict
 from ray.util.debug import log_once
 
@@ -202,7 +203,7 @@ class PPOConfig(PGConfig):
     def training(
         self,
         *,
-        lr_schedule: Optional[List[List[Union[int, float]]]] = NotProvided,
+        lr_schedule: Optional[Union(List[List[Union[int, float]]], Schedule)] = NotProvided,
         use_critic: Optional[bool] = NotProvided,
         use_gae: Optional[bool] = NotProvided,
         lambda_: Optional[float] = NotProvided,

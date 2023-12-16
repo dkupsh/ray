@@ -507,7 +507,7 @@ class TorchPolicyV2(Policy):
 
         with torch.no_grad():
             # Pass lazy (torch) tensor dict to Model as `input_dict`.
-            input_dict = self._lazy_tensor_dict(input_dict)
+            input_dict = self._lazy_tensor_dict(input_dict, device=self.device)
             input_dict.set_training(True)
             # Pack internal state inputs into (separate) list.
             state_batches = [
@@ -806,6 +806,7 @@ class TorchPolicyV2(Policy):
             return self.learn_on_batch(batch)
 
         if len(self.devices) > 1:
+            
             # Copy weights of main model (tower-0) to all other towers.
             state_dict = self.model.state_dict()
             # Just making sure tower-0 is really the same as self.model.

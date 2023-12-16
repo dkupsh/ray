@@ -1567,6 +1567,10 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
 
     for k in concated_samples[0].keys():
         try:
+            key_in_sample = [k in sample for sample in concated_samples]
+            if not all(key_in_sample):
+                continue
+            
             if k == "infos":
                 concatd_data[k] = _concat_values(
                     *[s[k] for s in concated_samples],
@@ -1595,11 +1599,6 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
             raise e
         except Exception as e:
             # Other errors are likely due to mismatching sub-structures.
-            print([type(s[k]['dfg_graph']) for s in concated_samples])
-            print([len(s[k]['dfg_graph'][0]) for s in concated_samples])
-            
-            
-            
             raise ValueError(
                 f"Cannot concat data under key '{k}', b/c "
                 "sub-structures under that key don't match. "
@@ -1732,10 +1731,7 @@ def _concat_values(*values, time_major=None) -> TensorType:
             for k in values[0].keys()
         }
     else:
-        raise ValueError(
-            f"Unsupported type for concatenation: {type(values[0])} "
-            f"first element: {values[0]}"
-        )
+        raise ValueError("Unsupported Concatenation", [type(i) for i in values])
 
 
 @DeveloperAPI
