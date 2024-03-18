@@ -1604,7 +1604,13 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
                 "sub-structures under that key don't match. "
                 f"`samples`={samples}\n Original error: \n {e}"
             )
-
+    
+    for key in concatd_data.keys():
+        if key == 'infos' or key == SampleBatch.OBS or key == SampleBatch.NEXT_OBS or key == SampleBatch.CUR_OBS:
+            if len(concatd_data[key]) == 0:
+                raise ValueError(f"Concatenated data under key '{key}' is empty!", samples)
+        
+    
     # Return a new (concat'd) SampleBatch.
     return SampleBatch(
         concatd_data,
@@ -1689,7 +1695,18 @@ def _concat_values(*values, time_major=None) -> TensorType:
     if torch and torch.is_tensor(values[0]):
         return torch.cat(values, dim=1 if time_major else 0)
     elif isinstance(values[0], np.ndarray):
-        return np.concatenate(values, axis=1 if time_major else 0)
+        if all(v.shape == values[0].shape for v in values):
+            return np.concatenate(values, axis=1 if time_major else 0)
+        else:
+            data = [v for v in values]
+            for i in range(len(data)):
+                if not isinstance(data[i], list):
+                    data[i] = list(data[i])
+            
+            concatenated_list = []
+            for sublist in data:
+                concatenated_list.extend(sublist)
+            return concatenated_list
     elif tf and tf.is_tensor(values[0]):
         return tf.concat(values, axis=1 if time_major else 0)
     elif isinstance(values[0], list):

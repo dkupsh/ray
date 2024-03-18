@@ -94,6 +94,7 @@ class MARWILConfig(AlgorithmConfig):
         self.input_ = "sampler"
         self.postprocess_inputs = True
         self.lr = 1e-4
+        self.lr_schedule = None
         self.train_batch_size = 2000
         # TODO (Artur): MARWIL should not need an exploration config as an offline
         #  algorithm. However, the current implementation of the CRR algorithm
@@ -115,7 +116,7 @@ class MARWILConfig(AlgorithmConfig):
     def training(
         self,
         *,
-        lr_schedule: Optional[Union(List[List[Union[int, float]]], Schedule)] = NotProvided,
+        lr_schedule = NotProvided,
         beta: Optional[float] = NotProvided,
         bc_logstd_coeff: Optional[float] = NotProvided,
         moving_average_sqd_adv_norm_update_rate: Optional[float] = NotProvided,

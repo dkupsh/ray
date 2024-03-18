@@ -203,7 +203,7 @@ class PPOConfig(PGConfig):
     def training(
         self,
         *,
-        lr_schedule: Optional[Union(List[List[Union[int, float]]], Schedule)] = NotProvided,
+        lr_schedule = NotProvided,
         use_critic: Optional[bool] = NotProvided,
         use_gae: Optional[bool] = NotProvided,
         lambda_: Optional[float] = NotProvided,

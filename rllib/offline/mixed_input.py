@@ -2,6 +2,7 @@ from types import FunctionType
 from typing import Dict
 
 import numpy as np
+from math import isclose
 from ray.rllib.offline.input_reader import InputReader
 from ray.rllib.offline.io_context import IOContext
 from ray.rllib.offline.json_reader import JsonReader
@@ -34,8 +35,10 @@ class MixedInput(InputReader):
                 probabilities. The probabilities must sum to 1.0.
             ioctx: current IO context object.
         """
-        if sum(dist.values()) != 1.0:
-            raise ValueError("Values must sum to 1.0: {}".format(dist))
+        
+        
+        if not isclose(sum(dist.values()), 1.0, rel_tol=1e-5):
+            raise ValueError("Values must sum to 1.0: {}".format(sum(dist.values())))
         self.choices = []
         self.p = []
         for k, v in dist.items():
