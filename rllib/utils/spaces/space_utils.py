@@ -1,5 +1,5 @@
 import gymnasium as gym
-from gymnasium.spaces import Tuple, Dict, Graph
+from gymnasium.spaces import Tuple, Dict, Graph, Sequence
 import numpy as np
 from ray.rllib.utils.annotations import DeveloperAPI
 import tree  # pip install dm_tree
@@ -124,6 +124,8 @@ def get_dummy_batch_for_space(
             lambda s: get_dummy_batch_for_space(s, batch_size, fill_value),
             get_base_struct_from_space(space),
         )
+    elif isinstance(space, Sequence):
+        return [get_dummy_batch_for_space(space.feature_space, batch_size, fill_value) for _ in range(1)]
     elif isinstance(space, Graph):
         # Helper Functions to get nodes/edges
         def get_nodes(num_nodes):
@@ -395,5 +397,4 @@ def convert_element_to_space_type(element: Any, sampled_element: Any) -> Any:
                 elem = int(elem)
 
         return elem
-
     return tree.map_structure(map_, element, sampled_element, check_types=False)

@@ -237,7 +237,27 @@ def convert_to_torch_tensor(x: TensorStructType, device: Optional[str] = None):
             else:
                 return torch.from_numpy(item).to(device=device)
         elif isinstance(item, list):
-            return torch.from_numpy(np.asarray(item), device)
+            #return torch.from_numpy(np.asarray(item), device)
+            return_array = [convert_to_torch_tensor(i, device) for i in item]
+            
+            if all(isinstance(arr, (int, float)) for arr in return_array):
+                return np.array(return_array)
+            
+            torch_array = all(isinstance(arr, torch.Tensor) for arr in return_array)
+            numpy_array = all(isinstance(arr, np.ndarray) for arr in return_array)
+            
+            if not torch_array and not numpy_array:
+                return return_array
+            
+            same_shape = all(arr.shape == return_array[0].shape for arr in return_array)
+            same_dtype = all(arr.dtype == return_array[0].dtype for arr in return_array)
+            
+            if same_shape and same_dtype:
+                if torch_array:
+                    return torch.stack(return_array)
+                else:
+                    return np.stack(return_array)
+            return return_array
             #return [convert_to_torch_tensor(i, device) for i in item]
         elif isinstance(item, GraphInstance) or (isinstance(item, tuple) and len(item) == 3):
             nodes = [convert_to_torch_tensor(i, device) for i in item[0]]
