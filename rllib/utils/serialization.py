@@ -128,6 +128,13 @@ def gym_space_to_dict(space: gym.spaces.Space) -> Dict:
             "space": "tuple",
             "spaces": [gym_space_to_dict(sp) for sp in sp.spaces],
         }
+    
+    def _sequence(sp: gym.spaces.Sequence) -> Dict:
+        return {
+            "space": "sequence",
+            "feature_space": sp.feature_space,
+            "stack": sp.stack,
+        }
 
     def _dict(sp: gym.spaces.Dict) -> Dict:
         return {
@@ -191,6 +198,8 @@ def gym_space_to_dict(space: gym.spaces.Space) -> Dict:
         return _multi_discrete(space)
     elif isinstance(space, gym.spaces.Tuple):
         return _tuple(space)
+    elif isinstance(space, gym.spaces.Sequence):
+        return _sequence(space)
     elif isinstance(space, gym.spaces.Dict):
         return _dict(space)
     elif isinstance(space, gym.spaces.Graph):
@@ -280,6 +289,9 @@ def gym_space_from_dict(d: Dict) -> gym.spaces.Space:
         spaces = {k: gym_space_from_dict(sp) for k, sp in d["spaces"].items()}
         return gym.spaces.Dict(spaces=spaces)
     
+    def _sequence(d: Dict) -> gym.spaces.Sequence:
+        return gym.spaces.Sequence(feature_space=d["feature_space"], stack=d["stack"])
+    
     def _graph(d: Dict) -> gym.spaces.Graph:
         node_space = gym_space_from_dict(d["node_space"])
         edge_space = gym_space_from_dict(d["edge_space"])
@@ -305,6 +317,7 @@ def gym_space_from_dict(d: Dict) -> gym.spaces.Space:
         "multi-binary": _multi_binary,
         "multi-discrete": _multi_discrete,
         "tuple": _tuple,
+        "sequence": _sequence,
         "dict": _dict,
         "graph": _graph,
         "simplex": _simplex,

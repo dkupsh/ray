@@ -465,7 +465,7 @@ def make_multi_callbacks(callback_class_list: List[Type[DefaultCallbacks]]):
             be baked into the to-be-returned class. All of these sub-classes'
             implemented methods will be called in the given order.
     """
-
+    
     class _MultiCallbacks(DefaultCallbacks):
         IS_CALLBACK_CONTAINER = True
 

@@ -168,6 +168,12 @@ def multi_gpu_train_one_step(algorithm, train_batch) -> Dict:
                     # Learn on the pre-loaded data in the buffer.
                     # Note: For minibatch SGD, the data is an offset into
                     # the pre-loaded entire train batch.
+                    if per_device_batch_size == 0:
+                        raise ValueError(
+                            "Batch size too small for number of devices!"
+                        )
+                    if len(permutation) == 0:
+                        raise ValueError("Empty permutation!")
                     results = policy.learn_on_loaded_batch(
                         permutation[batch_index] * per_device_batch_size, buffer_index=0
                     )

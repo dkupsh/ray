@@ -1695,7 +1695,17 @@ def _concat_values(*values, time_major=None) -> TensorType:
     if torch and torch.is_tensor(values[0]):
         return torch.cat(values, dim=1 if time_major else 0)
     elif isinstance(values[0], np.ndarray):
-        if all(v.shape == values[0].shape for v in values):
+        if not all(isinstance(v, np.ndarray) for v in values):
+            data = [v for v in values]
+            for i in range(len(data)):
+                if not isinstance(data[i], list):
+                    data[i] = list(data[i])
+            
+            concatenated_list = []
+            for sublist in data:
+                concatenated_list.extend(sublist)
+            return concatenated_list 
+        elif all(v.shape == values[0].shape for v in values):
             return np.concatenate(values, axis=1 if time_major else 0)
         else:
             data = [v for v in values]

@@ -254,7 +254,7 @@ def convert_to_torch_tensor(x: TensorStructType, device: Optional[str] = None):
             
             if same_shape and same_dtype:
                 if torch_array:
-                    return torch.stack(return_array)
+                    return torch.stack(return_array).to(device=device)
                 else:
                     return np.stack(return_array)
             return return_array
