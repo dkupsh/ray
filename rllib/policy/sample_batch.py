@@ -5,8 +5,10 @@ from functools import partial
 from numbers import Number
 from typing import Dict, Iterator, List, Optional, Set, Union
 
+import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray._common.deprecation import Deprecated, deprecation_warning
 from ray.rllib.core.columns import Columns
@@ -78,7 +80,7 @@ def attempt_count_timesteps(tensor_dict: dict):
         # If this is a nested dict (for example a nested observation),
         # try to flatten it, assert that all elements have the same length (batch
         # dimension)
-        v_list = tree.flatten(v) if isinstance(v, (dict, tuple)) else [v]
+        v_list = graph_space_utils.flatten(v) if isinstance(v, (dict, tuple)) else [v]
         # TODO: Drop support for lists and Numbers as values.
         # If v_list contains lists or Numbers, convert them to arrays, too.
         v_list = [
@@ -354,7 +356,7 @@ class SampleBatch(dict):
             A deep or shallow copy of this SampleBatch object.
         """
         copy_ = dict(self)
-        data = tree.map_structure(
+        data = graph_space_utils.map_structure(
             lambda v: (
                 np.array(v, copy=not shallow) if isinstance(v, np.ndarray) else v
             ),
@@ -406,7 +408,7 @@ class SampleBatch(dict):
         self_as_dict = dict(self)
 
         for i in range(self.count):
-            yield tree.map_structure_with_path(
+            yield graph_space_utils.map_structure_with_path(
                 lambda p, v, i=i: v[i] if p[0] != self.SEQ_LENS else seq_lens,
                 self_as_dict,
             )
@@ -483,7 +485,13 @@ class SampleBatch(dict):
 
         self_as_dict = dict(self)
         infos = self_as_dict.pop(Columns.INFOS, None)
-        shuffled = tree.map_structure(lambda v: v[permutation], self_as_dict)
+
+        def _permutation(v):
+            if isinstance(v, tuple) and len(v) > 0 and isinstance(v[0], gym.spaces.GraphInstance):
+                return tuple(v[i] for i in permutation)
+            return v[permutation]
+
+        shuffled = graph_space_utils.map_structure(_permutation, self_as_dict)
         if infos is not None:
             self_as_dict[Columns.INFOS] = [infos[i] for i in permutation]
 
@@ -559,7 +567,7 @@ class SampleBatch(dict):
                     offset = i
                     cur_eps_id = next_eps_id
             # Add final slice.
-            slices.append(self[offset : self.count])
+            slices.append(self[offset: self.count])
             return slices
 
         def slice_by_terminateds_or_truncateds():
@@ -572,7 +580,7 @@ class SampleBatch(dict):
                     # Since self[i] is the last timestep of the episode,
                     # append it to the batch, then set offset to the start
                     # of the next batch
-                    slices.append(self[offset : i + 1])
+                    slices.append(self[offset: i + 1])
                     offset = i + 1
             # Add final slice.
             if offset != self.count:
@@ -636,8 +644,11 @@ class SampleBatch(dict):
                     if k != SampleBatch.SEQ_LENS and not k.startswith("state_in_")
                 }
             else:
+                def _slice(s):
+                    return s[start:end]
+
                 data = {
-                    k: tree.map_structure(lambda s: s[start:end], v)
+                    k: graph_space_utils.map_structure(_slice, v)
                     for k, v in self.items()
                     if k != SampleBatch.SEQ_LENS and not k.startswith("state_in_")
                 }
@@ -668,7 +679,7 @@ class SampleBatch(dict):
                         if state_start is None:
                             state_start = i
                         while state_key in self:
-                            data[state_key] = self[state_key][state_start : i + 1]
+                            data[state_key] = self[state_key][state_start: i + 1]
                             state_idx += 1
                             state_key = "state_in_{}".format(state_idx)
                         seq_lens = list(self[SampleBatch.SEQ_LENS][state_start:i]) + [
@@ -693,7 +704,7 @@ class SampleBatch(dict):
             )
         else:
             return SampleBatch(
-                tree.map_structure(lambda value: value[start:end], self),
+                graph_space_utils.map_structure(lambda value: value[start:end], self),
                 _is_training=self.is_training,
                 _time_major=self.time_major,
                 _num_grad_updates=self.num_grad_updates,
@@ -730,7 +741,7 @@ class SampleBatch(dict):
         # Furthermore, slicing does not work when the data in the column is
         # singular (not a list or array).
         infos = self.pop(SampleBatch.INFOS, None)
-        data = tree.map_structure(lambda value: value[start:stop], self)
+        data = graph_space_utils.map_structure(lambda value: value[start:stop], self)
         if infos is not None:
             # Slice infos according to SEQ_LENS.
             info_slice_start = int(sum(self[SampleBatch.SEQ_LENS][:start]))
@@ -868,7 +879,7 @@ class SampleBatch(dict):
             # Fill primer with data.
             f_pad_base = f_base = 0
             for len_ in self[SampleBatch.SEQ_LENS]:
-                f_pad[f_pad_base : f_pad_base + len_] = value[f_base : f_base + len_]
+                f_pad[f_pad_base: f_pad_base + len_] = value[f_base: f_base + len_]
                 f_pad_base += max_seq_len
                 f_base += len_
             assert f_base == len(value), value
@@ -881,7 +892,7 @@ class SampleBatch(dict):
                 curr = curr[p]
 
         self_as_dict = dict(self)
-        tree.map_structure_with_path(_zero_pad_in_place, self_as_dict)
+        graph_space_utils.map_structure_with_path(_zero_pad_in_place, self_as_dict)
 
         # Set flags to indicate, we are now zero-padded (and to what extend).
         self.zero_padded = True
@@ -925,7 +936,7 @@ class SampleBatch(dict):
         """
         return sum(
             v.nbytes if isinstance(v, np.ndarray) else sys.getsizeof(v)
-            for v in tree.flatten(self)
+            for v in graph_space_utils.flatten(self)
         )
 
     def get(self, key, default=None):
@@ -1077,7 +1088,7 @@ class SampleBatch(dict):
                         curr[p] = np.array([pack(o) for o in value])
                 curr = curr[p]
 
-        tree.map_structure_with_path(_compress_in_place, self)
+        graph_space_utils.map_structure_with_path(_compress_in_place, self)
 
         return self
 
@@ -1108,7 +1119,7 @@ class SampleBatch(dict):
             elif len(value) > 0 and is_compressed(value[0]):
                 curr[path[-1]] = np.array([unpack(o) for o in value])
 
-        tree.map_structure_with_path(_decompress_in_place, self)
+        graph_space_utils.map_structure_with_path(_decompress_in_place, self)
 
         return self
 
@@ -1190,7 +1201,7 @@ class SampleBatch(dict):
                     return value[start_seq_len:stop_seq_len]
 
             infos = self.pop(SampleBatch.INFOS, None)
-            data = tree.map_structure_with_path(map_, self)
+            data = graph_space_utils.map_structure_with_path(map_, self)
             if infos is not None and isinstance(infos, (list, np.ndarray)):
                 self[SampleBatch.INFOS] = infos
                 data[SampleBatch.INFOS] = infos[start_unpadded:stop_unpadded]
@@ -1205,7 +1216,7 @@ class SampleBatch(dict):
             )
         else:
             infos = self.pop(SampleBatch.INFOS, None)
-            data = tree.map_structure(lambda s: s[start:stop], self)
+            data = graph_space_utils.map_structure(lambda s: s[start:stop], self)
             if infos is not None and isinstance(infos, (list, np.ndarray)):
                 self[SampleBatch.INFOS] = infos
                 data[SampleBatch.INFOS] = infos[start:stop]
@@ -1332,14 +1343,14 @@ class SampleBatch(dict):
                     )
                 # Single index.
                 else:
-                    input_dict[view_col] = tree.map_structure(
+                    input_dict[view_col] = graph_space_utils.map_structure(
                         lambda v: v[-1:],  # keep as array (w/ 1 element)
                         self[data_col],
                     )
             # Single index somewhere inside the trajectory (non-last).
             else:
                 input_dict[view_col] = self[data_col][
-                    index : index + 1 if index != -1 else None
+                    index: index + 1 if index != -1 else None
                 ]
 
         return SampleBatch(input_dict, seq_lens=np.array([1], dtype=np.int32))
@@ -1698,7 +1709,7 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
         else:
             values_to_concat = [c[k] for c in concated_samples]
             _concat_values_w_time = partial(_concat_values, time_major=time_major)
-            concatd_data[k] = tree.map_structure(
+            concatd_data[k] = graph_space_utils.map_structure(
                 _concat_values_w_time, *values_to_concat
             )
 
@@ -1799,6 +1810,8 @@ def _concat_values(*values, time_major=None) -> TensorType:
         return np.concatenate(values, axis=1 if time_major else 0)
     elif tf and tf.is_tensor(values[0]):
         return tf.concat(values, axis=1 if time_major else 0)
+    elif isinstance(values[0], tuple):
+        return tuple([list(value) for value in values])
     elif isinstance(values[0], list):
         concatenated_list = []
         for sublist in values:

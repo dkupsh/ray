@@ -8,6 +8,7 @@ import numpy as np
 import tree  # pip install dm_tree
 from gymnasium.spaces import Discrete, MultiDiscrete
 from packaging import version
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.models.repeated_values import RepeatedValues
 from ray.rllib.utils.annotations import DeveloperAPI, OldAPIStack, PublicAPI
@@ -276,7 +277,7 @@ def convert_to_torch_tensor(
         # Special handling for "RepeatedValues" types.
         if isinstance(item, RepeatedValues):
             return RepeatedValues(
-                tree.map_structure(mapping, item.values),
+                graph_space_utils.map_structure(mapping, item.values),
                 item.lengths,
                 item.max_len,
             )
@@ -295,6 +296,21 @@ def convert_to_torch_tensor(
                     tensor = torch.from_numpy(item)
             else:
                 tensor = torch.from_numpy(item)
+        elif isinstance(item, tuple) and len(item) > 0 and isinstance(item[0], gym.spaces.GraphInstance):
+            return_tuples = []
+            for graph in item:
+                return_tuples.append(gym.spaces.GraphInstance(
+                    nodes=convert_to_torch_tensor(graph.nodes, device, pin_memory),
+                    edges=convert_to_torch_tensor(graph.edges, device, pin_memory),
+                    edge_links=convert_to_torch_tensor(graph.edge_links, device, pin_memory),
+                ))
+            return tuple(return_tuples)
+        elif isinstance(item, gym.spaces.GraphInstance):
+            return gym.spaces.GraphInstance(
+                nodes=convert_to_torch_tensor(item.nodes, device, pin_memory),
+                edges=convert_to_torch_tensor(item.edges, device, pin_memory),
+                edge_links=convert_to_torch_tensor(item.edge_links, device, pin_memory),
+            )
         else:
             tensor = torch.from_numpy(np.asarray(item))
 
@@ -320,7 +336,9 @@ def convert_to_torch_tensor(
 
         return tensor
 
-    return tree.map_structure(mapping, x)
+    tensor = graph_space_utils.map_structure(mapping, x)
+
+    return tensor
 
 
 @PublicAPI
@@ -351,7 +369,7 @@ def copy_torch_tensors(x: TensorStructType, device: Optional[str] = None):
         else:
             return item
 
-    return tree.map_structure(mapping, x)
+    return graph_space_utils.map_structure(mapping, x)
 
 
 @PublicAPI

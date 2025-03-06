@@ -4,6 +4,7 @@ import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
 from gymnasium.utils.env_checker import data_equivalence
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.utils.numpy import LARGE_INTEGER, one_hot, one_hot_multidiscrete
 from ray.rllib.utils.serialization import gym_space_from_dict, gym_space_to_dict
@@ -106,8 +107,13 @@ class InfiniteLookbackBuffer:
     def append(self, item) -> None:
         """Appends the given item to the end of this buffer."""
         if self.finalized:
-            self.data = tree.map_structure(
-                lambda d, i: np.concatenate([d, [i]], axis=0), self.data, item
+            def _append(d, i):
+                if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                    return tuple([*d, *i])
+                return np.concatenate([d, [i]], axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _append, self.data, item
             )
         else:
             self.data.append(item)
@@ -118,8 +124,13 @@ class InfiniteLookbackBuffer:
             # TODO (sven): When extending with a list of structs, we should
             #  probably rather do: `tree.map_structure(..., self.data,
             #  tree.map_structure(lambda *s: np.array(*s), *items)`)??
-            self.data = tree.map_structure(
-                lambda d, i: np.concatenate([d, i], axis=0),
+            def _extend(d, i):
+                if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                    return tuple([*d, *i])
+                return np.concatenate([d, i], axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _extend,
                 self.data,
                 # Note, we could have dictionaries here.
                 np.array(items) if isinstance(items, list) else items,
@@ -144,8 +155,13 @@ class InfiniteLookbackBuffer:
                 method).
         """
         if self.finalized:
-            self.data = tree.map_structure(
-                lambda s: np.delete(s, index, axis=0), self.data
+            def _pop(d):
+                if isinstance(d, tuple) and len(d) > 0 and isinstance(d[0], gym.spaces.GraphInstance):
+                    return tuple([s for i, s in enumerate(d) if i != index])
+                return np.delete(d, index, axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _pop, self.data
             )
         else:
             self.data.pop(index)
@@ -280,7 +296,7 @@ class InfiniteLookbackBuffer:
             # lookback buffer anymore. We assume that `other`'s lookback buffer i
             # already at the end of `self`.
             elif isinstance(other, InfiniteLookbackBuffer):
-                data = self.data + other.data[other.lookback :]
+                data = self.data + other.data[other.lookback:]
             # `other` is a list, simply concat the two lists and use the result as
             # the underlying data for the returned buffer.
             else:
@@ -361,7 +377,7 @@ class InfiniteLookbackBuffer:
 
     def len_incl_lookback(self):
         if self.finalized:
-            return len(tree.flatten(self.data)[0])
+            return len(graph_space_utils.flatten(self.data)[0])
         else:
             return len(self.data)
 
@@ -392,13 +408,21 @@ class InfiniteLookbackBuffer:
         data_to_use = self.data
         if _ignore_last_ts:
             if self.finalized:
-                data_to_use = tree.map_structure(lambda s: s[:-1], self.data)
+                def _slice(s):
+                    return s[:-1]
+
+                data_to_use = graph_space_utils.map_structure(_slice, self.data)
             else:
                 data_to_use = self.data[:-1]
         if _add_last_ts_value is not None:
             if self.finalized:
-                data_to_use = tree.map_structure(
-                    lambda s, t: np.append(s, t),
+                def _append(s, t):
+                    if isinstance(t, tuple) and len(t) > 0 and isinstance(t[0], gym.spaces.GraphInstance):
+                        return tuple([*s, *t])
+                    return np.append(s, t)
+
+                data_to_use = graph_space_utils.map_structure(
+                    _append,
                     data_to_use.copy(),
                     _add_last_ts_value,
                 )
@@ -419,7 +443,10 @@ class InfiniteLookbackBuffer:
         data_slice = None
         if slice_len > 0:
             if self.finalized:
-                data_slice = tree.map_structure(lambda s: s[slice_], data_to_use)
+                def _slice(s):
+                    return s[slice_]
+
+                data_slice = graph_space_utils.map_structure(_slice, data_to_use)
             else:
                 data_slice = data_to_use[slice_]
 
@@ -440,8 +467,14 @@ class InfiniteLookbackBuffer:
                             one_hot_discrete=one_hot_discrete,
                         )
                     if data_slice is not None:
-                        data_slice = tree.map_structure(
-                            lambda s0, s: np.concatenate([s0, s]),
+
+                        def _extend(d, i):
+                            if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                                return tuple([*d, *i])
+                            return np.concatenate([d, i], axis=0)
+
+                        data_slice = graph_space_utils.map_structure(
+                            _extend,
                             fill_batch,
                             data_slice,
                         )
@@ -458,8 +491,14 @@ class InfiniteLookbackBuffer:
                             one_hot_discrete=one_hot_discrete,
                         )
                     if data_slice is not None:
-                        data_slice = tree.map_structure(
-                            lambda s0, s: np.concatenate([s, s0]),
+
+                        def _extend(d, i):
+                            if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                                return tuple([*d, *i])
+                            return np.concatenate([d, i], axis=0)
+
+                        data_slice = graph_space_utils.map_structure(
+                            _extend,
                             fill_batch,
                             data_slice,
                         )
@@ -486,7 +525,10 @@ class InfiniteLookbackBuffer:
 
         if data_slice is None:
             if self.finalized:
-                return tree.map_structure(lambda s: s[slice_], data_to_use)
+                def _slice(s):
+                    return s[slice_]
+
+                return graph_space_utils.map_structure(_slice, data_to_use)
             else:
                 return data_to_use[slice_]
         return data_slice
@@ -503,14 +545,19 @@ class InfiniteLookbackBuffer:
         # (it shouldn't). If it does, raise an error.
         try:
             if self.finalized:
-
                 def __set(s, n):
                     if self.space:
                         assert self.space.contains(n[0])
                     assert len(s[slice_]) == len(n)
-                    s[slice_] = n
 
-                tree.map_structure(__set, self.data, new_data)
+                    if isinstance(s, tuple):
+                        return_tuple = list(s)
+                        return_tuple[slice_] = list(n)
+                        s = tuple(return_tuple)
+                    else:
+                        s[slice_] = n
+
+                graph_space_utils.map_structure(__set, self.data, new_data)
             else:
                 assert len(self.data[slice_]) == len(new_data)
                 self.data[slice_] = new_data
@@ -533,13 +580,24 @@ class InfiniteLookbackBuffer:
         data_to_use = self.data
         if _ignore_last_ts:
             if self.finalized:
-                data_to_use = tree.map_structure(lambda s: s[:-1], self.data)
+                def _slice(s):
+                    if isinstance(s, tuple) and len(s) > 0 and isinstance(s[0], gym.spaces.GraphInstance):
+                        return s[:-1]
+                    return s[:-1]
+
+                data_to_use = graph_space_utils.map_structure(_slice, self.data)
             else:
                 data_to_use = self.data[:-1]
         if _add_last_ts_value is not None:
             if self.finalized:
-                data_to_use = tree.map_structure(
-                    lambda s, last: np.append(s, last), data_to_use, _add_last_ts_value
+
+                def _extend(d, i):
+                    if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                        return tuple([*d, *i])
+                    return np.concatenate([d, i], axis=0)
+
+                data_to_use = graph_space_utils.map_structure(
+                    _extend, data_to_use, _add_last_ts_value
                 )
             else:
                 data_to_use = data_to_use.copy()
@@ -558,7 +616,12 @@ class InfiniteLookbackBuffer:
 
         try:
             if self.finalized:
-                data = tree.map_structure(lambda s: s[idx], data_to_use)
+                def _slice(s):
+                    if isinstance(s, tuple) and len(s) > 0 and isinstance(s[0], gym.spaces.GraphInstance):
+                        return tuple([s[idx]])
+                    return s[idx]
+
+                data = graph_space_utils.map_structure(_slice, data_to_use)
             else:
                 data = data_to_use[idx]
         # Out of range index -> If `fill`, use a fill dummy (B=0), if not, error out.
@@ -598,10 +661,17 @@ class InfiniteLookbackBuffer:
 
                 def __set(s, n):
                     if self.space:
-                        assert self.space.contains(n), n
-                    s[actual_idx] = n
+                        assert self.space.contains(n[0])
+                    assert len(s[actual_idx]) == len(n)
 
-                tree.map_structure(__set, self.data, new_data)
+                    if isinstance(s, tuple):
+                        return_tuple = list(s)
+                        return_tuple[actual_idx] = n
+                        s = tuple(return_tuple)
+                    else:
+                        s[actual_idx] = n
+
+                graph_space_utils.map_structure(__set, self.data, new_data)
             else:
                 self.data[actual_idx] = new_data
         except IndexError:
@@ -708,8 +778,8 @@ class InfiniteLookbackBuffer:
 
         if isinstance(data, list):
             data = [
-                tree.map_structure(_convert, dslice, space_struct) for dslice in data
+                graph_space_utils.map_structure(_convert, dslice, space_struct) for dslice in data
             ]
         else:
-            data = tree.map_structure(_convert, data, space_struct)
+            data = graph_space_utils.map_structure(_convert, data, space_struct)
         return data
