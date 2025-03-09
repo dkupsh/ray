@@ -131,6 +131,12 @@ def get_base_struct_from_space(space):
             return tuple(_helper_struct(s) for s in space_)
         elif isinstance(space_, gym.spaces.Dict):
             return {k: _helper_struct(space_[k]) for k in space_.spaces}
+        elif isinstance(space_, gym.spaces.GraphInstance):
+            return gym.spaces.GraphInstance(
+                nodes=_helper_struct(space_.nodes),
+                edges=_helper_struct(space_.edges),
+                edge_links=_helper_struct(space_.edge_links),
+            )
         else:
             return space_
 
@@ -179,7 +185,7 @@ def get_dummy_batch_for_space(
         base_struct = space
         if isinstance(space, (gym.spaces.Dict, gym.spaces.Tuple)):
             base_struct = get_base_struct_from_space(space)
-        return tree.map_structure(
+        return graph_space_utils.map_structure(
             lambda s: get_dummy_batch_for_space(
                 space=s,
                 batch_size=batch_size,
@@ -196,6 +202,37 @@ def get_dummy_batch_for_space(
             space = gym.spaces.Box(0.0, 1.0, (space.n,), np.float32)
         elif isinstance(space, gym.spaces.MultiDiscrete):
             space = gym.spaces.Box(0.0, 1.0, (np.sum(space.nvec),), np.float32)
+
+    if isinstance(space, gym.spaces.Graph):
+        def generate_graph_dummy() -> gym.spaces.GraphInstance:
+            gen = np.random.Generator(np.random.PCG64())
+            num_nodes = gen.integers(low=5, high=10)
+            num_edges = gen.integers(low=2, high=num_nodes * (num_nodes - 1))
+            edge_links = gen.integers(
+                low=0, high=num_nodes, size=(num_edges, 2), dtype=np.int32
+            )
+
+            return gym.spaces.GraphInstance(
+                nodes=get_dummy_batch_for_space(
+                    space.node_space,
+                    batch_size=num_nodes,
+                    fill_value=fill_value,
+                    time_size=time_size,
+                    time_major=time_major,
+                    one_hot_discrete=one_hot_discrete
+                ).reshape(num_nodes, -1),
+                edges=get_dummy_batch_for_space(
+                    space.edge_space,
+                    batch_size=num_edges,
+                    fill_value=fill_value,
+                    time_size=time_size,
+                    time_major=time_major,
+                    one_hot_discrete=one_hot_discrete
+                ).reshape(num_edges, -1),
+                edge_links=edge_links,
+            )
+
+        return tuple([generate_graph_dummy() for _ in range(batch_size)])
 
     # Primitive spaces: Box, Discrete, MultiDiscrete.
     # Random values: Use gym's sample() method.
