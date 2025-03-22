@@ -2,6 +2,7 @@ import platform
 from typing import List
 
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 import ray
 from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
@@ -79,7 +80,7 @@ class AggregatorActor(FaultAwareApply):
         # that produced the ref has crashed or had its entire node go down.
         # In this case, try each ref individually and collect only valid results.
         try:
-            episodes = tree.flatten(ray.get(episode_refs))
+            episodes = graph_space_utils.flatten(ray.get(episode_refs))
         except ray.exceptions.OwnerDiedError:
             for ref in episode_refs:
                 try:

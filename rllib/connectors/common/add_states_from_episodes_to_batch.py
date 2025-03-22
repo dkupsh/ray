@@ -5,6 +5,8 @@ import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
 
+from ray.rllib.utils.spaces import graph_space_utils
+
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.core import DEFAULT_MODULE_ID
 from ray.rllib.core.columns import Columns
@@ -267,7 +269,7 @@ class AddStatesFromEpisodesToBatch(ConnectorV2):
                     # Then simply use the `look_back_state`, i.e. in this case the
                     # initial state as `"state_in` in training.
                     if sa_episode.is_numpy:
-                        state_outs = tree.map_structure(
+                        state_outs = graph_space_utils.map_structure(
                             lambda a, _sae=sa_episode: np.repeat(
                                 a[np.newaxis, ...], len(_sae), axis=0
                             ),
@@ -282,7 +284,7 @@ class AddStatesFromEpisodesToBatch(ConnectorV2):
                 # STATE_OUT, but therefore add the lookback/init state at
                 # the beginning.
                 items_to_add = (
-                    tree.map_structure(
+                    graph_space_utils.map_structure(
                         lambda i, o, m=max_seq_len: np.concatenate([[i], o[:-1]])[::m],
                         look_back_state,
                         state_outs,
@@ -299,7 +301,7 @@ class AddStatesFromEpisodesToBatch(ConnectorV2):
                 )
                 if Columns.NEXT_OBS in batch:
                     items_to_add = (
-                        tree.map_structure(
+                        graph_space_utils.map_structure(
                             lambda i, m=max_seq_len: i[::m],
                             state_outs,
                         )

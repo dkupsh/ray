@@ -2,6 +2,7 @@ from collections import OrderedDict
 from gymnasium.spaces import Discrete, MultiDiscrete
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 from types import MappingProxyType
 from typing import List, Optional
 
@@ -156,7 +157,7 @@ def convert_to_numpy(x: TensorStructType, reduce_type: bool = True) -> TensorStr
                 ret = ret.astype(np.int32)
         return ret
 
-    return tree.map_structure(mapping, x)
+    return graph_space_utils.map_structure(mapping, x)
 
 
 @PublicAPI
@@ -269,9 +270,9 @@ def flatten_inputs_to_1d_tensor(
     # `time_axis` must not be True if `batch_axis` is False.
     assert not (time_axis and not batch_axis)
 
-    flat_inputs = tree.flatten(inputs)
+    flat_inputs = graph_space_utils.flatten(inputs)
     flat_spaces = (
-        tree.flatten(spaces_struct)
+        graph_space_utils.flatten(spaces_struct)
         if spaces_struct is not None
         else [None] * len(flat_inputs)
     )

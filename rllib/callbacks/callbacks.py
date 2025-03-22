@@ -606,26 +606,37 @@ class MemoryTrackingCallbacks(RLlibCallback):
         policies: Optional[Dict[PolicyID, Policy]] = None,
         **kwargs,
     ) -> None:
+        # Trigger garbage collection before measuring memory
         gc.collect()
+
+        # Take a snapshot of memory allocations
         snapshot = tracemalloc.take_snapshot()
         top_stats = snapshot.statistics("lineno")
 
+        trace_dict = {}
+
+        # Track top 10 memory allocation lines
         for stat in top_stats[:10]:
             count = stat.count
-            # Convert total size from Bytes to KiB.
-            size = stat.size / 1024
-
+            size = stat.size / 1024  # Convert size from bytes to KiB
             trace = str(stat.traceback)
+            trace_dict[f"tracemalloc/{trace}/size"] = size
+            trace_dict[f"tracemalloc/{trace}/count"] = count
 
-            episode.custom_metrics[f"tracemalloc/{trace}/size"] = size
-            episode.custom_metrics[f"tracemalloc/{trace}/count"] = count
-
+        # Use psutil to track process memory usage (RSS and VMS)
         process = psutil.Process(os.getpid())
         worker_rss = process.memory_info().rss
         worker_vms = process.memory_info().vms
+
+        # Add Linux-specific memory data (only available on Linux)
         if platform.system() == "Linux":
-            # This is only available on Linux
-            worker_data = process.memory_info().data
-            episode.custom_metrics["tracemalloc/worker/data"] = worker_data
-        episode.custom_metrics["tracemalloc/worker/rss"] = worker_rss
-        episode.custom_metrics["tracemalloc/worker/vms"] = worker_vms
+            if hasattr(process.memory_info(), "data"):
+                worker_data = process.memory_info().data
+                trace_dict["tracemalloc/worker/data"] = worker_data
+
+        trace_dict["tracemalloc/worker/rss"] = worker_rss / (1024 * 1024)  # Convert to MB
+        trace_dict["tracemalloc/worker/vms"] = worker_vms / (1024 * 1024)  # Convert to MB
+
+        # Log the memory metrics to metrics_logger
+        if metrics_logger:
+            metrics_logger.log_dict(trace_dict)

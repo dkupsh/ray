@@ -3,6 +3,7 @@ from typing import List, Tuple, Union
 
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.utils.spaces.space_utils import batch, BatchedNdArray
 from ray.util.annotations import DeveloperAPI
@@ -96,7 +97,7 @@ def split_and_zero_pad(
         data as `item_list`, but split into sub-chunks of size `max_seq_len`.
         The last item in the returned list may be zero-padded, if necessary.
     """
-    zero_element = tree.map_structure(
+    zero_element = graph_space_utils.map_structure(
         lambda s: np.zeros_like([s[0]] if isinstance(s, BatchedNdArray) else s),
         item_list[0],
     )

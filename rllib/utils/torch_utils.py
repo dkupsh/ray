@@ -464,9 +464,9 @@ def flatten_inputs_to_1d_tensor(
 
     """
 
-    flat_inputs = tree.flatten(inputs)
+    flat_inputs = graph_space_utils.flatten(inputs)
     flat_spaces = (
-        tree.flatten(spaces_struct)
+        graph_space_utils.flatten(spaces_struct)
         if spaces_struct is not None
         else [None] * len(flat_inputs)
     )

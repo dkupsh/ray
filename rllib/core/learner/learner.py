@@ -19,6 +19,7 @@ from typing import (
 )
 
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 import ray
 from ray.data.iterator import DataIterator
@@ -1361,7 +1362,7 @@ class Learner(Checkpointable):
             # that produced the ref has crashed or had its entire node go down.
             # In this case, try each ref individually and collect only valid results.
             try:
-                episodes = tree.flatten(ray.get(episodes))
+                episodes = graph_space_utils.flatten(ray.get(episodes))
             except ray.exceptions.OwnerDiedError:
                 episode_refs = episodes
                 episodes = []

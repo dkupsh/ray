@@ -1,6 +1,7 @@
 import gymnasium as gym
 import numpy as np
 import tree
+from ray.rllib.utils.spaces import graph_space_utils
 from typing import Dict, Any, List
 
 import logging
@@ -172,7 +173,7 @@ class OffPolicyEstimator(OfflineEvaluator):
                 estimates_per_epsiode.append(estimate_step_results)
 
             # turn a list of identical dicts into a dict of lists
-            estimates_per_epsiode = tree.map_structure(
+            estimates_per_epsiode = graph_space_utils.map_structure(
                 lambda *x: list(x), *estimates_per_epsiode
             )
         else:

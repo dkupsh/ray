@@ -2,6 +2,7 @@ import logging
 from typing import List, Optional, Union
 import tree
 
+from ray.rllib.utils.spaces import graph_space_utils
 from ray.rllib.env.env_runner_group import EnvRunnerGroup
 from ray.rllib.policy.sample_batch import (
     SampleBatch,
@@ -176,7 +177,7 @@ def synchronous_parallel_sample(
     if concat is True:
         # If we have episodes flatten the episode list.
         if _uses_new_env_runners:
-            sample_batches_or_episodes = tree.flatten(sample_batches_or_episodes)
+            sample_batches_or_episodes = graph_space_utils.flatten(sample_batches_or_episodes)
         # Otherwise we concatenate the `SampleBatch` objects
         else:
             sample_batches_or_episodes = concat_samples(sample_batches_or_episodes)

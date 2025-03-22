@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.core import DEFAULT_MODULE_ID
@@ -202,7 +203,7 @@ class AddTimeDimToBatchAndZeroPad(ConnectorV2):
                         if mid is not None and not rl_module[mid].is_stateful()
                         # Expand on axis 0 (the to-be-time-dim) if item has not been
                         # batched yet, otherwise axis=1 (the time-dim).
-                        else tree.map_structure(
+                        else graph_space_utils.map_structure(
                             lambda s: np.expand_dims(
                                 s, axis=(1 if isinstance(s, BatchedNdArray) else 0)
                             ),

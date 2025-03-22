@@ -15,6 +15,7 @@ from typing import (
 
 import gymnasium as gym
 import tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.core.rl_module.rl_module import RLModule
 from ray.rllib.env.single_agent_episode import SingleAgentEpisode
@@ -717,7 +718,7 @@ class ConnectorV2(Checkpointable, abc.ABC):
             column=column,
             # Convert given input into BatchedNdArray(s) such that the `batch` utility
             # knows that it'll have to concat, not stack.
-            item_to_add=tree.map_structure(_tag, items_to_add),
+            item_to_add=graph_space_utils.map_structure(_tag, items_to_add),
             single_agent_episode=single_agent_episode,
         )
 

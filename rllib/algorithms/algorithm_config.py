@@ -19,6 +19,7 @@ from typing import (
 
 import gymnasium as gym
 import tree
+from ray.rllib.utils.spaces import graph_space_utils
 from packaging import version
 
 import ray
@@ -4722,7 +4723,7 @@ class AlgorithmConfig(_Config):
         # For those users that accidentally use the new API stack (because it's the
         # default now for many algos), we need to make sure they are warned.
         try:
-            tree.assert_same_structure(self.model, MODEL_DEFAULTS)
+            graph_space_utils.assert_same_structure(self.model, MODEL_DEFAULTS)
             # Create copies excluding the specified key
             check(
                 {k: v for k, v in self.model.items() if k != "vf_share_layers"},

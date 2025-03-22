@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Optional
 
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.core.columns import Columns
@@ -54,7 +55,7 @@ class RemoveSingleTsTimeRankFromBatch(ConnectorV2):
             # Only remove time-rank for modules that are statefule (only for those has
             # a timerank been added).
             if mid is None or rl_module[mid].is_stateful():
-                return tree.map_structure(lambda s: np.squeeze(s, axis=0), item)
+                return graph_space_utils.map_structure(lambda s: np.squeeze(s, axis=0), item)
             return item
 
         for column, column_data in batch.copy().items():

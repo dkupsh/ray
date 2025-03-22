@@ -5,6 +5,7 @@ import sys
 from typing import Any, Optional, TYPE_CHECKING
 
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 import ray
 from ray.rllib.utils.annotations import DeveloperAPI, PublicAPI
@@ -44,7 +45,7 @@ def convert_to_tensor(
     elif framework == "tf2":
         _, tf, _ = try_import_tf()
 
-        return tree.map_structure(lambda s: tf.convert_to_tensor(s), data)
+        return graph_space_utils.map_structure(lambda s: tf.convert_to_tensor(s), data)
     raise NotImplementedError(
         f"framework={framework} not supported in `convert_to_tensor()`!"
     )

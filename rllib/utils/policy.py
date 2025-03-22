@@ -12,6 +12,7 @@ from typing import (
     TYPE_CHECKING,
 )
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 
 import ray.cloudpickle as pickle
@@ -222,7 +223,7 @@ def local_policy_inference(
 
         # Note (Kourosh): policy output is batched, the AgentConnectorDataType should
         # not be batched during inference. This is the assumption made in AgentCollector
-        policy_output = tree.map_structure(lambda x: x[0], policy_output)
+        policy_output = graph_space_utils.map_structure(lambda x: x[0], policy_output)
 
         action_connector_data = ActionConnectorDataType(
             env_id, agent_id, ac.data.raw_dict, policy_output
@@ -286,7 +287,7 @@ def __check_atari_obs_space(obs):
     #  connectors (and don't auto-wrap in RW anymore)
     if any(
         o.shape == ATARI_OBS_SHAPE if isinstance(o, np.ndarray) else False
-        for o in tree.flatten(obs)
+        for o in graph_space_utils.flatten(obs)
     ):
         if log_once("warn_about_possibly_non_wrapped_atari_env"):
             logger.warning(

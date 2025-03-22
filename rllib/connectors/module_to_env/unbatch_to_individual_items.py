@@ -2,6 +2,7 @@ from collections import defaultdict
 from typing import Any, Dict, List, Optional
 
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.core.rl_module.rl_module import RLModule
@@ -50,7 +51,7 @@ class UnBatchToIndividualItems(ConnectorV2):
         episode_map_structure = shared_data.get("vector_env_episodes_map", {})
         # Simple case (no structure stored): Just unbatch.
         if memorized_map_structure is None:
-            return tree.map_structure(lambda s: unbatch_fn(s), batch)
+            return graph_space_utils.map_structure(lambda s: unbatch_fn(s), batch)
         # Single agent case: Memorized structure is a list, whose indices map to
         # eps_id values.
         elif isinstance(memorized_map_structure, list):

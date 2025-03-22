@@ -31,6 +31,7 @@ from typing import (
     Union,
 )
 
+from ray.rllib.utils.spaces import graph_space_utils
 import tree  # pip install dm_tree
 
 import ray
@@ -1167,7 +1168,7 @@ class Algorithm(Checkpointable, Trainable):
             if estimates:
                 eval_results["off_policy_estimator"] = {}
                 for name, estimate_list in estimates.items():
-                    avg_estimate = tree.map_structure(
+                    avg_estimate = graph_space_utils.map_structure(
                         lambda *x: np.mean(x, axis=0), *estimate_list
                     )
                     eval_results["off_policy_estimator"][name] = avg_estimate

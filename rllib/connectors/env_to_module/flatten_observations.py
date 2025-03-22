@@ -4,6 +4,7 @@ import gymnasium as gym
 from gymnasium.spaces import Box
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.core.rl_module.rl_module import RLModule
@@ -111,7 +112,7 @@ class FlattenObservations(ConnectorV2):
                     spaces[agent_id] = self._input_obs_base_struct[agent_id]
                 else:
                     sample = flatten_inputs_to_1d_tensor(
-                        tree.map_structure(
+                        graph_space_utils.map_structure(
                             lambda s: s.sample(),
                             self._input_obs_base_struct[agent_id],
                         ),
@@ -124,7 +125,7 @@ class FlattenObservations(ConnectorV2):
             return gym.spaces.Dict(spaces)
         else:
             sample = flatten_inputs_to_1d_tensor(
-                tree.map_structure(
+                graph_space_utils.map_structure(
                     lambda s: s.sample(),
                     self._input_obs_base_struct,
                 ),

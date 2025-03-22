@@ -2,6 +2,7 @@ import logging
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.utils import force_tuple
 from ray.rllib.utils.metrics.stats import Stats
@@ -202,7 +203,7 @@ class MetricsLogger:
             if isinstance(struct, Stats):
                 return struct.peek(throughput=throughput)
 
-            ret = tree.map_structure(
+            ret = graph_space_utils.map_structure(
                 lambda s: s.peek(throughput=throughput),
                 struct.copy(),
             )
@@ -219,7 +220,7 @@ class MetricsLogger:
             A corresponding structure of the peek'd `results` (reduced float/int values;
             no Stats objects).
         """
-        return tree.map_structure(
+        return graph_space_utils.map_structure(
             lambda s: s.peek() if isinstance(s, Stats) else s, results
         )
 
@@ -462,7 +463,7 @@ class MetricsLogger:
         prefix_key = force_tuple(key)
 
         def _map(path, stat_or_value):
-            extended_key = prefix_key + force_tuple(tree.flatten(path))
+            extended_key = prefix_key + force_tuple(graph_space_utils.flatten(path))
 
             self.log_value(
                 extended_key,
@@ -474,7 +475,7 @@ class MetricsLogger:
             )
 
         with self._threading_lock:
-            tree.map_structure_with_path(_map, stats_dict)
+            graph_space_utils.map_structure_with_path(_map, stats_dict)
 
     def merge_and_log_n_dicts(
         self,
@@ -628,7 +629,7 @@ class MetricsLogger:
 
         all_keys = set()
         for stats_dict in stats_dicts:
-            tree.map_structure_with_path(
+            graph_space_utils.map_structure_with_path(
                 lambda path, _: all_keys.add(force_tuple(path)),
                 stats_dict,
             )
@@ -905,7 +906,7 @@ class MetricsLogger:
                 assert (
                     not self.tensor_mode
                 ), "Can't reduce if `self.tensor_mode` is True!"
-                reduced_stats_to_return = tree.map_structure_with_path(
+                reduced_stats_to_return = graph_space_utils.map_structure_with_path(
                     _reduce, stats_to_return
                 )
         # Provide proper error message if reduction fails due to bad data.
@@ -1101,7 +1102,7 @@ class MetricsLogger:
             self._tensor_keys.add(key)
 
     def _key_in_stats(self, flat_key, *, stats=None):
-        flat_key = force_tuple(tree.flatten(flat_key))
+        flat_key = force_tuple(graph_space_utils.flatten(flat_key))
         _dict = stats if stats is not None else self.stats
         for key in flat_key:
             if key not in _dict:
@@ -1110,7 +1111,7 @@ class MetricsLogger:
         return True
 
     def _get_key(self, flat_key, *, stats=None, key_error=True):
-        flat_key = force_tuple(tree.flatten(flat_key))
+        flat_key = force_tuple(graph_space_utils.flatten(flat_key))
         _dict = stats if stats is not None else self.stats
         for key in flat_key:
             try:
@@ -1123,7 +1124,7 @@ class MetricsLogger:
         return _dict
 
     def _set_key(self, flat_key, stats):
-        flat_key = force_tuple(tree.flatten(flat_key))
+        flat_key = force_tuple(graph_space_utils.flatten(flat_key))
 
         with self._threading_lock:
             _dict = self.stats
@@ -1140,7 +1141,7 @@ class MetricsLogger:
                 _dict = _dict[key]
 
     def _del_key(self, flat_key, key_error=False):
-        flat_key = force_tuple(tree.flatten(flat_key))
+        flat_key = force_tuple(graph_space_utils.flatten(flat_key))
 
         with self._threading_lock:
             # Erase the tensor key as well, if applicable.

@@ -1121,7 +1121,6 @@ class SampleBatch(dict):
                 curr[path[-1]] = np.array([unpack(o) for o in value])
 
         graph_space_utils.map_structure_with_path(_decompress_in_place, self)
-
         return self
 
     @DeveloperAPI

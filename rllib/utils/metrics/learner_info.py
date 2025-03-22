@@ -1,6 +1,7 @@
 from collections import defaultdict
 import numpy as np
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 from typing import Dict
 
 from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
@@ -83,7 +84,7 @@ class LearnerInfoBuilder:
         for policy_id, results_all_towers in self.results_all_towers.items():
             # Reduce mean across all minibatch SGD steps (axis=0 to keep
             # all shapes as-is).
-            info[policy_id] = tree.map_structure_with_path(
+            info[policy_id] = graph_space_utils.map_structure_with_path(
                 _all_tower_reduce, *results_all_towers
             )
 

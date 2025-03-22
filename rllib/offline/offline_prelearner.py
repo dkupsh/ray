@@ -45,6 +45,7 @@ SCHEMA = {
     "dones": "dones",
     "unroll_id": "unroll_id",
 }
+import ray.data
 
 logger = logging.getLogger(__name__)
 
@@ -153,12 +154,17 @@ class OfflinePreLearner:
             # Import `msgpack` for decoding.
             import msgpack
             import msgpack_numpy as mnp
-
+            
+            def convert(data):
+                if isinstance(data, SingleAgentEpisode):
+                    return data
+                return SingleAgentEpisode.from_state(
+                    msgpack.unpackb(data, object_hook=mnp.decode)
+                )
+                
             # Read the episodes and decode them.
             episodes: List[SingleAgentEpisode] = [
-                SingleAgentEpisode.from_state(
-                    msgpack.unpackb(state, object_hook=mnp.decode)
-                )
+                convert(state)
                 for state in batch["item"]
             ]
             # Ensure that all episodes are done and no duplicates are in the batch.
@@ -219,7 +225,7 @@ class OfflinePreLearner:
             )["episodes"]
 
         # TODO (simon): Make synching work. Right now this becomes blocking or never
-        #  receives weights. Learners appear to be non accessi ble via other actors.
+        #  receives weights. Learners appear to be non accessible via other actors.
         # Increase the counter for updating the module.
         # self.iter_since_last_module_update += 1
 

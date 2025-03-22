@@ -3,6 +3,7 @@ from typing import Any, Dict, List, Optional
 
 import gymnasium as gym
 import tree  # pip install dm_tree
+from ray.rllib.utils.spaces import graph_space_utils
 
 from ray.rllib.connectors.connector_v2 import ConnectorV2
 from ray.rllib.core.columns import Columns
@@ -100,7 +101,7 @@ class _FrameStacking(ConnectorV2):
                 self.add_n_batch_items(
                     batch=batch,
                     column=Columns.OBS,
-                    items_to_add=tree.map_structure(
+                    items_to_add=graph_space_utils.map_structure(
                         _map_fn,
                         sa_episode.get_observations(
                             indices=slice(-self.num_frames + 1, len(sa_episode)),
@@ -123,7 +124,7 @@ class _FrameStacking(ConnectorV2):
                 )
                 # Observation components are (w, h, 1)
                 # -> concatenate along axis=-1 to (w, h, [num_frames]).
-                stacked_obs = tree.map_structure(
+                stacked_obs = graph_space_utils.map_structure(
                     lambda *s: np.concatenate(s, axis=2),
                     *obs_stack,
                 )

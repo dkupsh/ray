@@ -262,6 +262,18 @@ def get_dummy_batch_for_space(
                 low=0, high=num_nodes, size=(num_edges, 2), dtype=np.int32
             )
 
+            if space.edge_space is None:
+                edge_properties = None
+            else:
+                edge_properties = get_dummy_batch_for_space(
+                    space.edge_space,
+                    batch_size=num_edges,
+                    fill_value=fill_value,
+                    time_size=time_size,
+                    time_major=time_major,
+                    one_hot_discrete=one_hot_discrete
+                ).reshape(num_edges, -1)
+
             return gym.spaces.GraphInstance(
                 nodes=get_dummy_batch_for_space(
                     space.node_space,
@@ -271,14 +283,7 @@ def get_dummy_batch_for_space(
                     time_major=time_major,
                     one_hot_discrete=one_hot_discrete
                 ).reshape(num_nodes, -1),
-                edges=get_dummy_batch_for_space(
-                    space.edge_space,
-                    batch_size=num_edges,
-                    fill_value=fill_value,
-                    time_size=time_size,
-                    time_major=time_major,
-                    one_hot_discrete=one_hot_discrete
-                ).reshape(num_edges, -1),
+                edges=edge_properties,
                 edge_links=edge_links,
             )
 
@@ -355,7 +360,7 @@ def flatten_to_single_ndarray(input_):
     # Concatenate complex inputs.
     if isinstance(input_, (list, tuple, dict)):
         expanded = []
-        for in_ in tree.flatten(input_):
+        for in_ in graph_space_utils.flatten(input_):
             expanded.append(np.reshape(in_, [-1]))
         input_ = np.concatenate(expanded, axis=0).flatten()
     return input_
@@ -494,7 +499,7 @@ def clip_action(action, action_space):
             a = np.clip(a, s.low, s.high)
         return a
 
-    return tree.map_structure(map_, action, action_space)
+    return graph_space_utils.map_structure(map_, action, action_space)
 
 
 @DeveloperAPI
@@ -538,7 +543,7 @@ def unsquash_action(action, action_space_struct):
                 a = s.low + a
         return a
 
-    return tree.map_structure(map_, action, action_space_struct)
+    return graph_space_utils.map_structure(map_, action, action_space_struct)
 
 
 @DeveloperAPI
@@ -569,7 +574,7 @@ def normalize_action(action, action_space_struct):
             a = ((a - s.low) * 2.0) / (s.high - s.low) - 1.0
         return a
 
-    return tree.map_structure(map_, action, action_space_struct)
+    return graph_space_utils.map_structure(map_, action, action_space_struct)
 
 
 @DeveloperAPI
@@ -614,4 +619,4 @@ def convert_element_to_space_type(element: Any, sampled_element: Any) -> Any:
 
         return elem
 
-    return tree.map_structure(map_, element, sampled_element, check_types=False)
+    return graph_space_utils.map_structure(map_, element, sampled_element, check_types=False)
