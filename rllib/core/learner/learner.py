@@ -1282,65 +1282,8 @@ class Learner(Checkpointable):
             (COMPONENT_RL_MODULE, self.module),
         ]
 
-    def _get_optimizer_state(self) -> StateDict:
-        """Returns the state of all optimizers currently registered in this Learner.
-
-        Returns:
-            The current state of all optimizers currently registered in this Learner.
-        """
-        raise NotImplementedError
-
-    def _set_optimizer_state(self, state: StateDict) -> None:
-        """Sets the state of all optimizers currently registered in this Learner.
-
-        Args:
-            state: The state of the optimizers.
-        """
-        raise NotImplementedError
-
-    def _update_from_batch_or_episodes(
-        self,
-        *,
-        # TODO (sven): We should allow passing in a single agent batch here
-        #  as well for simplicity.
-        batch: Optional[MultiAgentBatch] = None,
-        episodes: Optional[List[EpisodeType]] = None,
-        # TODO (sven): Make this a more formal structure with its own type.
-        timesteps: Optional[Dict[str, Any]] = None,
-        # TODO (sven): Deprecate these in favor of config attributes for only those
-        #  algos that actually need (and know how) to do minibatching.
-        num_epochs: int = 1,
-        minibatch_size: Optional[int] = None,
-        shuffle_batch_per_epoch: bool = False,
-        num_total_minibatches: int = 0,
-    ) -> None:
-
-        self._check_is_built()
-
-        # Call `before_gradient_based_update` to allow for non-gradient based
-        # preparations-, logging-, and update logic to happen.
-        self.before_gradient_based_update(timesteps=timesteps or {})
-
-        # Resolve batch/episodes being ray object refs (instead of
-        # actual batch/episodes objects).
-        if isinstance(batch, ray.ObjectRef):
-            batch = ray.get(batch)
-        if isinstance(episodes, ray.ObjectRef):
-            episodes = ray.get(episodes)
-        elif isinstance(episodes, list) and isinstance(episodes[0], ray.ObjectRef):
-            # It's possible that individual refs are invalid due to the EnvRunner
-            # that produced the ref has crashed or had its entire node go down.
-            # In this case, try each ref individually and collect only valid results.
-            try:
-                episodes = tree.flatten(ray.get(episodes))
-            except ray.exceptions.OwnerDiedError:
-                episode_refs = episodes
-                episodes = []
-                for ref in episode_refs:
-                    try:
-                        episodes.extend(ray.get(ref))
-                    except ray.exceptions.OwnerDiedError:
-                        pass
+    def _make_batch_if_necessary(self, training_data):
+        batch = training_data.batch
 
         # Call the learner connector on the given `episodes` (if we have one).
         if training_data.episodes is not None:
