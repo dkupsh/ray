@@ -73,7 +73,8 @@ def apply_grad_clipping(
     for param_group in optimizer.param_groups:
         # Make sure we only pass params with grad != None into torch
         # clip_grad_norm_. Would fail otherwise.
-        params = list(filter(lambda p: p.grad is not None, param_group["params"]))
+        params = list(
+            filter(lambda p: p.grad is not None, param_group["params"]))
         if params:
             # PyTorch clips gradients inplace and returns the norm before clipping
             # We therefore need to compute grad_gnorm further down (fixes #4965)
@@ -215,7 +216,8 @@ def concat_multi_gpu_td_errors(
     """
     td_error = torch.cat(
         [
-            t.tower_stats.get("td_error", torch.tensor([0.0])).to(policy.device)
+            t.tower_stats.get("td_error", torch.tensor(
+                [0.0])).to(policy.device)
             for t in policy.model_gpu_towers
         ],
         dim=0,
@@ -233,7 +235,8 @@ def convert_to_torch_tensor(
     device: Optional[str] = None,
     pin_memory: bool = False,
     use_stream: bool = False,
-    stream: Optional[Union["torch.cuda.Stream", "torch.cuda.classes.Stream"]] = None,
+    stream: Optional[Union["torch.cuda.Stream",
+                           "torch.cuda.classes.Stream"]] = None,
 ):
     """
     Converts any (possibly nested) structure to torch.Tensors.
@@ -251,7 +254,8 @@ def convert_to_torch_tensor(
     """
 
     # Convert the provided device (if any) to a torch.device; default to CPU.
-    device = torch.device(device) if device is not None else torch.device("cpu")
+    device = torch.device(
+        device) if device is not None else torch.device("cpu")
     is_cuda = (device.type == "cuda") and torch.cuda.is_available()
 
     # Determine the appropriate stream.
@@ -300,16 +304,20 @@ def convert_to_torch_tensor(
             return_tuples = []
             for graph in item:
                 return_tuples.append(gym.spaces.GraphInstance(
-                    nodes=convert_to_torch_tensor(graph.nodes, device, pin_memory),
-                    edges=convert_to_torch_tensor(graph.edges, device, pin_memory),
-                    edge_links=convert_to_torch_tensor(graph.edge_links, device, pin_memory),
+                    nodes=convert_to_torch_tensor(
+                        graph.nodes, device, pin_memory),
+                    edges=convert_to_torch_tensor(
+                        graph.edges, device, pin_memory),
+                    edge_links=convert_to_torch_tensor(
+                        graph.edge_links, device, pin_memory),
                 ))
             return tuple(return_tuples)
         elif isinstance(item, gym.spaces.GraphInstance):
             return gym.spaces.GraphInstance(
                 nodes=convert_to_torch_tensor(item.nodes, device, pin_memory),
                 edges=convert_to_torch_tensor(item.edges, device, pin_memory),
-                edge_links=convert_to_torch_tensor(item.edge_links, device, pin_memory),
+                edge_links=convert_to_torch_tensor(
+                    item.edge_links, device, pin_memory),
             )
         else:
             tensor = torch.from_numpy(np.asarray(item))
@@ -522,7 +530,8 @@ def global_norm(tensors: List[TensorType]) -> TensorType:
         The global L2 norm over the given tensor list.
     """
     # List of single tensors' L2 norms: SQRT(SUM(xi^2)) over all xi in tensor.
-    single_l2s = [torch.pow(torch.sum(torch.pow(t, 2.0)), 0.5) for t in tensors]
+    single_l2s = [torch.pow(torch.sum(torch.pow(t, 2.0)), 0.5)
+                  for t in tensors]
     # Compute global norm from all single tensors' L2 norms.
     return torch.pow(sum(torch.pow(l2, 2.0) for l2 in single_l2s), 0.5)
 
@@ -613,7 +622,8 @@ def one_hot(x: TensorType, space: gym.Space) -> TensorType:
         else:
             nvec = space.nvec
         return torch.cat(
-            [nn.functional.one_hot(x[:, i].long(), n) for i, n in enumerate(nvec)],
+            [nn.functional.one_hot(x[:, i].long(), n)
+             for i, n in enumerate(nvec)],
             dim=-1,
         )
     else:

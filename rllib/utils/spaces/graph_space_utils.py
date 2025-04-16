@@ -13,9 +13,11 @@ def map_structure(func, *structures, **kwargs):
 
     check_types = kwargs.pop("check_types", True)
     if kwargs:
-        raise ValueError(f"Only valid keyword argument is `check_types`, not: `{kwargs.keys()}`")
+        raise ValueError(
+            f"Only valid keyword argument is `check_types`, not: `{kwargs.keys()}`")
 
-    structures = [unbatch_graph_instance(structure) for structure in structures]
+    structures = [unbatch_graph_instance(structure)
+                  for structure in structures]
 
     # Ensure all structures have the same shape
     for other in structures[1:]:
@@ -56,9 +58,12 @@ def unflatten_as(structure, flat_sequence):
         # Handle dict (Mapping): Ensure keys are sorted and process each key-value pair recursively
         elif isinstance(struct, Mapping):
             try:
-                return {key: _unflatten(struct[key], flat_iter) for key in sorted(struct.keys())}
+                return type(struct)(
+                    (key, _unflatten(struct[key], flat_iter)) for key in sorted(struct.keys())
+                )
             except TypeError as e:
-                raise TypeError("Cannot unflatten dict with non-sortable keys") from e
+                raise TypeError(
+                    "Cannot unflatten dict with non-sortable keys") from e
 
         # If it's a scalar or any other type, just return the next element
         else:
@@ -73,7 +78,8 @@ def unflatten_as(structure, flat_sequence):
     # Ensure the flat sequence has no extra elements (check if fully consumed)
     try:
         next(flat_iter)
-        raise ValueError("Flat sequence contains more elements than required by structure")
+        raise ValueError(
+            "Flat sequence contains more elements than required by structure")
     except StopIteration:
         pass  # No extra elements, all good
 
@@ -102,9 +108,11 @@ def flatten(structure):
             # Flatten dictionary values in sorted order of keys
             return [item for key in sorted(structure.keys()) for item in flatten(structure[key])]
         except TypeError as e:
-            raise TypeError("Cannot flatten dict with non-sortable keys") from e
+            raise TypeError(
+                "Cannot flatten dict with non-sortable keys") from e
     else:
-        return [structure]  # Scalars are returned as a single element in a list
+        # Scalars are returned as a single element in a list
+        return [structure]
 
 
 def unbatch_graph_instance(structure):
@@ -117,7 +125,9 @@ def unbatch_graph_instance(structure):
     elif isinstance(structure, list):
         return [unbatch_graph_instance(sub) for sub in structure]
     elif isinstance(structure, Mapping):
-        return {key: unbatch_graph_instance(structure[key]) for key in sorted(structure.keys())}
+        return type(structure)(
+            (key, unbatch_graph_instance(structure[key])) for key in sorted(structure.keys())
+        )
     else:
         return structure
 
@@ -134,7 +144,9 @@ def unbatch_graph(structure):
     elif isinstance(structure, list):
         return [unbatch_graph(sub) for sub in structure]
     elif isinstance(structure, Mapping):
-        return {key: unbatch_graph(structure[key]) for key in sorted(structure.keys())}
+        return type(structure)(
+            (key, unbatch_graph_instance(structure[key])) for key in sorted(structure.keys())
+        )
     else:
         return structure
 
@@ -184,9 +196,11 @@ def map_structure_with_path(func, *structures, **kwargs):
 
     check_types = kwargs.pop("check_types", True)
     if kwargs:
-        raise ValueError(f"Only valid keyword argument is `check_types`, not: `{kwargs.keys()}`")
+        raise ValueError(
+            f"Only valid keyword argument is `check_types`, not: `{kwargs.keys()}`")
 
-    structures = [unbatch_graph_instance(structure) for structure in structures]
+    structures = [unbatch_graph_instance(structure)
+                  for structure in structures]
 
     for other in structures[1:]:
         assert_same_structure(structures[0], other, check_types=check_types)
@@ -197,7 +211,8 @@ def map_structure_with_path(func, *structures, **kwargs):
 
         elif isinstance(elems[0], tuple):
             if len(elems[0]) > 0 and isinstance(elems[0][0], gym.spaces.GraphInstance):
-                return func(path, *elems)  # Variable-length GraphInstance tuples are returned directly
+                # Variable-length GraphInstance tuples are returned directly
+                return func(path, *elems)
 
             return tuple(recursive_map(path + (i,), *childs) for i, childs in enumerate(zip(*elems)))
 
@@ -242,36 +257,44 @@ def assert_same_structure(a, b, check_types=True):
 
     if isinstance(a, gym.spaces.GraphInstance):
         if not isinstance(b, gym.spaces.GraphInstance):
-            raise AssertionError(f"Structures have different types: {type(a)} vs {type(b)}")
+            raise AssertionError(
+                f"Structures have different types: {type(a)} vs {type(b)}")
 
     elif isinstance(a, tuple):
         if not isinstance(b, tuple):
-            raise AssertionError(f"Structures have different types: {type(a)} vs {type(b)}")
+            raise AssertionError(
+                f"Structures have different types: {type(a)} vs {type(b)}")
 
         # If tuples contain GraphInstances, allow different lengths
         if len(a) > 0 and isinstance(a[0], gym.spaces.GraphInstance):
             if len(b) == 0 or not isinstance(b[0], gym.spaces.GraphInstance):
-                raise AssertionError("Both tuples must start with GraphInstances")
+                raise AssertionError(
+                    "Both tuples must start with GraphInstances")
         else:
             if len(a) != len(b):
-                raise AssertionError(f"Structures have different lengths: {len(a)} vs {len(b)}")
+                raise AssertionError(
+                    f"Structures have different lengths: {len(a)} vs {len(b)}")
             # for sub_a, sub_b in zip(a, b):
             #    assert_same_structure(sub_a, sub_b, check_types=check_types)
 
     elif isinstance(a, list):
         if not isinstance(b, list):
-            raise AssertionError(f"Structures have different types: {type(a)} vs {type(b)}")
+            raise AssertionError(
+                f"Structures have different types: {type(a)} vs {type(b)}")
         if len(a) != len(b):
-            raise AssertionError(f"Structures have different lengths: {len(a)} vs {len(b)}")
+            raise AssertionError(
+                f"Structures have different lengths: {len(a)} vs {len(b)}")
         for sub_a, sub_b in zip(a, b):
             assert_same_structure(sub_a, sub_b, check_types=check_types)
 
     elif isinstance(a, Mapping):
         if not isinstance(b, Mapping):
-            raise AssertionError(f"Structures have different types: {type(a)} vs {type(b)}")
+            raise AssertionError(
+                f"Structures have different types: {type(a)} vs {type(b)}")
 
         if set(a.keys()) != set(b.keys()):
-            raise AssertionError(f"Dictionaries have different keys: {set(a.keys())} vs {set(b.keys())}")
+            raise AssertionError(
+                f"Dictionaries have different keys: {set(a.keys())} vs {set(b.keys())}")
 
         for key in a:
             assert_same_structure(a[key], b[key], check_types=check_types)

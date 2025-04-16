@@ -50,6 +50,7 @@ from ray.rllib.utils.annotations import (
 from ray.rllib.utils.checkpoints import Checkpointable
 from ray.rllib.utils.debug import update_global_seed_if_necessary
 from ray.rllib.utils.framework import try_import_torch
+from ray.rllib.utils.numpy import convert_to_numpy
 from ray.rllib.utils.metrics import (
     ALL_MODULES,
     DATASET_NUM_ITERS_TRAINED,
@@ -473,7 +474,8 @@ class Learner(Checkpointable):
         for module_id in self.module.keys():
             if self.rl_module_is_compatible(self.module[module_id]):
                 config = self.config.get_config_for_module(module_id)
-                self.configure_optimizers_for_module(module_id=module_id, config=config)
+                self.configure_optimizers_for_module(
+                    module_id=module_id, config=config)
 
     @OverrideToImplementCustomLogic
     @abc.abstractmethod
@@ -621,7 +623,8 @@ class Learner(Checkpointable):
                             list(grad_dict_to_clip.values()),
                         )
                     self.metrics.log_value(
-                        key=(module_id, f"gradients_{optimizer_name}_global_norm"),
+                        key=(
+                            module_id, f"gradients_{optimizer_name}_global_norm"),
                         value=global_norm,
                         window=1,
                     )
@@ -713,7 +716,7 @@ class Learner(Checkpointable):
             optimizer = self._named_optimizers[full_registration_name]
             # TODO (sven): How can we avoid registering optimziers under this
             #  constructed `[module_id]_[optim_name]` format?
-            optim_name = full_registration_name[len(module_id) + 1 :]
+            optim_name = full_registration_name[len(module_id) + 1:]
             named_optimizers.append((optim_name, optimizer))
         return named_optimizers
 
@@ -834,12 +837,15 @@ class Learner(Checkpointable):
         self.config.policies[module_id] = PolicySpec()
         if config_overrides is not None:
             self.config.multi_agent(
-                algorithm_config_overrides_per_module={module_id: config_overrides}
+                algorithm_config_overrides_per_module={
+                    module_id: config_overrides}
             )
-        self.config.rl_module(rl_module_spec=MultiRLModuleSpec.from_module(self.module))
+        self.config.rl_module(
+            rl_module_spec=MultiRLModuleSpec.from_module(self.module))
         self._module_spec = self.config.rl_module_spec
         if new_should_module_be_updated is not None:
-            self.config.multi_agent(policies_to_train=new_should_module_be_updated)
+            self.config.multi_agent(
+                policies_to_train=new_should_module_be_updated)
 
         # Allow the user to configure one or more optimizers for this new module.
         self.configure_optimizers_for_module(
@@ -897,8 +903,10 @@ class Learner(Checkpointable):
         del self.config.policies[module_id]
         self.config.algorithm_config_overrides_per_module.pop(module_id, None)
         if new_should_module_be_updated is not None:
-            self.config.multi_agent(policies_to_train=new_should_module_be_updated)
-        self.config.rl_module(rl_module_spec=MultiRLModuleSpec.from_module(self.module))
+            self.config.multi_agent(
+                policies_to_train=new_should_module_be_updated)
+        self.config.rl_module(
+            rl_module_spec=MultiRLModuleSpec.from_module(self.module))
 
         # Remove all stats from the module from our metrics logger, so we don't report
         # results from this module again.
@@ -1218,7 +1226,8 @@ class Learner(Checkpointable):
                 batch,
                 num_epochs=num_epochs,
                 minibatch_size=minibatch_size,
-                shuffle_batch_per_epoch=shuffle_batch_per_epoch and (num_epochs > 1),
+                shuffle_batch_per_epoch=shuffle_batch_per_epoch and (
+                    num_epochs > 1),
                 num_total_minibatches=num_total_minibatches,
             )
         return batch_iter
@@ -1268,7 +1277,8 @@ class Learner(Checkpointable):
 
         if self._check_component(COMPONENT_RL_MODULE, components, not_components):
             state[COMPONENT_RL_MODULE] = self.module.get_state(
-                components=self._get_subcomponents(COMPONENT_RL_MODULE, components),
+                components=self._get_subcomponents(
+                    COMPONENT_RL_MODULE, components),
                 not_components=self._get_subcomponents(
                     COMPONENT_RL_MODULE, not_components
                 ),
@@ -1303,7 +1313,8 @@ class Learner(Checkpointable):
         # Update our trainable Modules information/function via our config.
         # If not provided in state (None), all Modules will be trained by default.
         if "should_module_be_updated" in state:
-            self.config.multi_agent(policies_to_train=state["should_module_be_updated"])
+            self.config.multi_agent(
+                policies_to_train=state["should_module_be_updated"])
 
         # TODO (sven): Make `MetricsLogger` a Checkpointable.
         if COMPONENT_METRICS_LOGGER in state:
@@ -1330,6 +1341,13 @@ class Learner(Checkpointable):
 
     def _make_batch_if_necessary(self, training_data):
         batch = training_data.batch
+
+        def is_numpy(x):
+            if isinstance(x, dict):
+                return is_numpy(list(x.values())[0])
+            elif isinstance(x, tuple):
+                return is_numpy(x[0])
+            return isinstance(x, numpy.ndarray)
 
         # Call the learner connector on the given `episodes` (if we have one).
         if training_data.episodes is not None:
@@ -1380,21 +1398,7 @@ class Learner(Checkpointable):
         elif (
             isinstance(training_data.batch, MultiAgentBatch)
             and training_data.batch.policy_batches
-            and (
-                any(
-                    tree.map_structure(
-                        lambda a: isinstance(a, numpy.ndarray),
-                        tree.flatten(training_data.batch.policy_batches),
-                    )
-                )
-                or any(
-                    tree.map_structure(
-                        lambda a: isinstance(a, torch.Tensor)
-                        and a.device != self._device,
-                        tree.flatten(training_data.batch.policy_batches),
-                    )
-                )
-            )
+            and is_numpy(next(iter(training_data.batch.policy_batches.values()))["obs"])
         ):
             batch = self._convert_batch_type(training_data.batch)
 
@@ -1452,15 +1456,17 @@ class Learner(Checkpointable):
                 lr_schedule = self._optimizer_lr_schedules.get(optimizer)
                 if lr_schedule is not None:
                     new_lr = lr_schedule.update(
-                        timestep=timesteps.get(NUM_ENV_STEPS_SAMPLED_LIFETIME, 0)
+                        timestep=timesteps.get(
+                            NUM_ENV_STEPS_SAMPLED_LIFETIME, 0)
                     )
                     self._set_optimizer_lr(optimizer, lr=new_lr)
                 self.metrics.log_value(
                     # Cut out the module ID from the beginning since it's already part
                     # of the key sequence: (ModuleID, "[optim name]_lr").
-                    key=(module_id, f"{optimizer_name[len(module_id) + 1:]}_{LR_KEY}"),
-                    reduce="mean",
-                    value=self._get_optimizer_lr(optimizer),
+                    key=(
+                        module_id, f"{optimizer_name[len(module_id) + 1:]}_{LR_KEY}"),
+                    value=convert_to_numpy(self._get_optimizer_lr(optimizer)),
+                    window=1,
                 )
 
     def _set_slicing_by_batch_id(
