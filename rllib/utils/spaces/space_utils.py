@@ -63,6 +63,7 @@ def is_composite_space(space: gym.Space) -> bool:
         gym.spaces.Graph,
         gym.spaces.Sequence,
         gym.spaces.Tuple,
+        gym.spaces.GraphInstance
     ]:
         return True
     else:
@@ -356,7 +357,8 @@ def batch(
     #  this method that concatenate should be used (not stack)).
     if individual_items_already_have_batch_dim == "auto":
         flat = graph_space_utils.flatten(list_of_structs[0])
-        individual_items_already_have_batch_dim = isinstance(flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
+        individual_items_already_have_batch_dim = isinstance(
+            flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
 
     def batch_func(*s):
         if isinstance(s[0], gym.spaces.GraphInstance):

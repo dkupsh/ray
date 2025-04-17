@@ -100,8 +100,12 @@ class InfiniteLookbackBuffer:
         buffer.finalized = state["finalized"]
         buffer.space = gym_space_from_dict(state["space"]) if state["space"] else None
         # space_struct is set when space is assigned
-        buffer.data = state["data"]
-
+        from ray.rllib.utils.spaces.graph_space_utils import convert_list_to_graph_structure
+        buffer.data = convert_list_to_graph_structure(
+            from_jsonable_if_needed(state["data"], buffer.space)
+            if buffer.space
+            else state["data"]
+        )
         return buffer
 
     def append(self, item) -> None:
@@ -283,7 +287,8 @@ class InfiniteLookbackBuffer:
         """
 
         if self.finalized:
-            raise RuntimeError(f"Cannot `add` to a finalized {type(self).__name__}.")
+            raise RuntimeError(
+                f"Cannot `add` to a finalized {type(self).__name__}.")
         else:
             # If `other` is an int, simply add it to all our values (if possible) and
             # use the result as the underlying data for the returned buffer.
@@ -411,7 +416,8 @@ class InfiniteLookbackBuffer:
                 def _slice(s):
                     return s[:-1]
 
-                data_to_use = graph_space_utils.map_structure(_slice, self.data)
+                data_to_use = graph_space_utils.map_structure(
+                    _slice, self.data)
             else:
                 data_to_use = self.data[:-1]
         if _add_last_ts_value is not None:
@@ -446,12 +452,14 @@ class InfiniteLookbackBuffer:
                 def _slice(s):
                     return s[slice_]
 
-                data_slice = graph_space_utils.map_structure(_slice, data_to_use)
+                data_slice = graph_space_utils.map_structure(
+                    _slice, data_to_use)
             else:
                 data_slice = data_to_use[slice_]
 
             if one_hot_discrete:
-                data_slice = self._one_hot(data_slice, space_struct=self.space_struct)
+                data_slice = self._one_hot(
+                    data_slice, space_struct=self.space_struct)
 
         # Data is shorter than the range requested -> Fill the rest with `fill` data.
         if fill is not None and (fill_right_count > 0 or fill_left_count > 0):
@@ -585,7 +593,8 @@ class InfiniteLookbackBuffer:
                         return s[:-1]
                     return s[:-1]
 
-                data_to_use = graph_space_utils.map_structure(_slice, self.data)
+                data_to_use = graph_space_utils.map_structure(
+                    _slice, self.data)
             else:
                 data_to_use = self.data[:-1]
         if _add_last_ts_value is not None:
@@ -755,11 +764,13 @@ class InfiniteLookbackBuffer:
             fill_right_count = -stop - 1
             stop = -LARGE_INTEGER
 
-        assert start >= 0 and (stop >= 0 or stop == -LARGE_INTEGER), (start, stop)
+        assert start >= 0 and (stop >= 0 or stop == -
+                               LARGE_INTEGER), (start, stop)
 
         step = slice_.step if slice_.step is not None else 1
         slice_ = slice(start, stop, step)
-        slice_len = max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+        slice_len = max(
+            0, (stop - start + (step - (1 if step > 0 else -1))) // step)
         return slice_, slice_len, fill_left_count, fill_right_count
 
     def _one_hot(self, data, space_struct):
@@ -781,5 +792,6 @@ class InfiniteLookbackBuffer:
                 graph_space_utils.map_structure(_convert, dslice, space_struct) for dslice in data
             ]
         else:
-            data = graph_space_utils.map_structure(_convert, data, space_struct)
+            data = graph_space_utils.map_structure(
+                _convert, data, space_struct)
         return data
