@@ -99,7 +99,8 @@ class ConnectorPipelineV2(ConnectorV2):
         full_stats = None
         if metrics:
             full_stats = metrics.log_time(
-                kwargs.get("metrics_prefix_key", ()) + (CONNECTOR_PIPELINE_TIMER,)
+                kwargs.get("metrics_prefix_key", ()) +
+                (CONNECTOR_PIPELINE_TIMER,)
             )
             full_stats.__enter__()
 
@@ -158,13 +159,15 @@ class ConnectorPipelineV2(ConnectorV2):
         idx = -1
         for i, c in enumerate(self.connectors):
             if (isinstance(name_or_class, type) and c.__class__ is name_or_class) or (
-                isinstance(name_or_class, str) and c.__class__.__name__ == name_or_class
+                isinstance(name_or_class,
+                           str) and c.__class__.__name__ == name_or_class
             ):
                 idx = i
                 break
         if idx >= 0:
             del self.connectors[idx]
-            self._fix_spaces(self.input_observation_space, self.input_action_space)
+            self._fix_spaces(self.input_observation_space,
+                             self.input_action_space)
             logger.info(
                 f"Removed connector {name_or_class} from {self.__class__.__name__}."
             )
@@ -191,7 +194,8 @@ class ConnectorPipelineV2(ConnectorV2):
         idx = -1
         for idx, c in enumerate(self.connectors):
             if (
-                isinstance(name_or_class, str) and c.__class__.__name__ == name_or_class
+                isinstance(name_or_class,
+                           str) and c.__class__.__name__ == name_or_class
             ) or (isinstance(name_or_class, type) and c.__class__ is name_or_class):
                 break
         if idx < 0:
@@ -227,7 +231,8 @@ class ConnectorPipelineV2(ConnectorV2):
         idx = -1
         for idx, c in enumerate(self.connectors):
             if (
-                isinstance(name_or_class, str) and c.__class__.__name__ == name_or_class
+                isinstance(name_or_class,
+                           str) and c.__class__.__name__ == name_or_class
             ) or (isinstance(name_or_class, type) and c.__class__ is name_or_class):
                 break
         if idx < 0:
@@ -288,7 +293,8 @@ class ConnectorPipelineV2(ConnectorV2):
             if self._check_component(conn_name, components, not_components):
                 sts = conn.get_state(
                     components=self._get_subcomponents(conn_name, components),
-                    not_components=self._get_subcomponents(conn_name, not_components),
+                    not_components=self._get_subcomponents(
+                        conn_name, not_components),
                     **kwargs,
                 )
                 # Ignore empty dicts.

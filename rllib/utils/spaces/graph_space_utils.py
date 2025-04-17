@@ -1,5 +1,6 @@
 import gymnasium as gym
 from collections.abc import Mapping
+import numpy as np
 
 
 def map_structure(func, *structures, **kwargs):
@@ -31,6 +32,30 @@ def map_structure(func, *structures, **kwargs):
 
     # Unflatten back to original structure
     return unflatten_as(structures[0], mapped_values)
+
+
+def convert_list_to_graph_structure(structure):
+    if isinstance(structure, gym.spaces.GraphInstance):
+        return structure
+    elif isinstance(structure, tuple):
+        if len(structure) > 0 and isinstance(structure[0], gym.spaces.GraphInstance):
+            return structure
+        else:
+            return tuple(convert_list_to_graph_structure(sub) for sub in structure)
+    elif isinstance(structure, list):
+        if len(structure) == 3 and all(isinstance(sub, np.ndarray) for sub in structure):
+            return gym.spaces.GraphInstance(
+                structure[0], structure[1], structure[2]
+            )
+
+        return [
+            convert_list_to_graph_structure(sub) for sub in structure]
+    elif isinstance(structure, Mapping):
+        return type(structure)(
+            (key, convert_list_to_graph_structure(structure[key])) for key in sorted(structure.keys())
+        )
+    else:
+        return structure
 
 
 def unflatten_as(structure, flat_sequence):

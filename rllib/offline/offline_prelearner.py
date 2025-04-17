@@ -161,6 +161,7 @@ class OfflinePreLearner:
                 )
                 for state in batch["item"]
             ]
+
             # Ensure that all episodes are done and no duplicates are in the batch.
             episodes = self._validate_episodes(episodes)
             # Add the episodes to the buffer.
@@ -411,12 +412,14 @@ class OfflinePreLearner:
                         if Columns.OBS in input_compress_columns
                         else convert(obs, observation_space),
                         convert(
-                            unpack_if_needed(batch[schema[Columns.NEXT_OBS]][i]),
+                            unpack_if_needed(
+                                batch[schema[Columns.NEXT_OBS]][i]),
                             observation_space,
                         )
                         if Columns.OBS in input_compress_columns
                         else convert(
-                            batch[schema[Columns.NEXT_OBS]][i], observation_space
+                            batch[schema[Columns.NEXT_OBS]
+                                  ][i], observation_space
                         ),
                     ],
                     infos=[
@@ -430,7 +433,8 @@ class OfflinePreLearner:
                     # reconvert from JSONable to space sample.
                     actions=[
                         convert(
-                            unpack_if_needed(batch[schema[Columns.ACTIONS]][i]),
+                            unpack_if_needed(
+                                batch[schema[Columns.ACTIONS]][i]),
                             action_space,
                         )
                         if Columns.ACTIONS in input_compress_columns
@@ -549,7 +553,8 @@ class OfflinePreLearner:
                     # Append the last `new_obs` to get the correct length of
                     # observations.
                     obs.append(
-                        unpack_if_needed(batch[schema[Columns.NEXT_OBS]][i][-1])
+                        unpack_if_needed(
+                            batch[schema[Columns.NEXT_OBS]][i][-1])
                         if schema[Columns.OBS] in input_compress_columns
                         else batch[schema[Columns.NEXT_OBS]][i][-1]
                     )
