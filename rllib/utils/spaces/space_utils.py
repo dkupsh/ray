@@ -5,6 +5,7 @@ import numpy as np
 import tree  # pip install dm_tree
 
 from ray.rllib.utils.annotations import DeveloperAPI
+from ray.rllib.utils.spaces import graph_space_utils
 
 
 @DeveloperAPI
@@ -62,6 +63,7 @@ def is_composite_space(space: gym.Space) -> bool:
         gym.spaces.Graph,
         gym.spaces.Sequence,
         gym.spaces.Tuple,
+        gym.spaces.GraphInstance
     ]:
         return True
     else:
@@ -351,50 +353,28 @@ def batch(
     if not list_of_structs:
         raise ValueError("Input `list_of_structs` does not contain any items.")
 
-    first = list_of_structs[0]
-    # Nested structures (dict/tuple) require tree traversal; leaves do not.
-    is_nested = isinstance(first, (dict, tuple))
-
     # TODO (sven): Maybe replace this by a list-override (usage of which indicated
     #  this method that concatenate should be used (not stack)).
     if individual_items_already_have_batch_dim == "auto":
-        if isinstance(first, BatchedNdArray):
-            individual_items_already_have_batch_dim = True
-        elif is_nested:
-            flat = tree.flatten(first)
-            individual_items_already_have_batch_dim = isinstance(
-                flat[0], BatchedNdArray
-            )
+        flat = graph_space_utils.flatten(list_of_structs[0])
+        individual_items_already_have_batch_dim = isinstance(
+            flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
+
+    def batch_func(*s):
+        if isinstance(s[0], gym.spaces.GraphInstance):
+            return tuple([item for item in s])
+        elif isinstance(s[0], tuple) and isinstance(s[0][0], gym.spaces.GraphInstance):
+            list_of_instances = []
+            for i in s:
+                list_of_instances.extend([j for j in i])
+            return tuple(list_of_instances)
+
+        if individual_items_already_have_batch_dim:
+            return np.ascontiguousarray(np.concatenate(s, axis=0))
         else:
-            individual_items_already_have_batch_dim = False
+            return np.ascontiguousarray(np.stack(s, axis=0))
 
-    if individual_items_already_have_batch_dim:
-        if is_nested:
-            ret = tree.map_structure(
-                lambda *s: np.concatenate(s, axis=0), *list_of_structs
-            )
-        else:
-            # Fast path: simple numpy arrays or scalars — no tree traversal needed.
-            ret = np.concatenate(list_of_structs, axis=0)
-    else:
-        n = len(list_of_structs)
-
-        def fast_stack(*s):
-            # NOTE (Artur): This is a faster version of np.stack as per my benchmarks.
-            s0 = s[0]
-            if not isinstance(s0, np.ndarray):
-                return np.array(s)
-            out = np.empty((n, *s0.shape), dtype=s0.dtype)
-            for i in range(n):
-                out[i] = s[i]
-            return out
-
-        if is_nested:
-            ret = tree.map_structure(fast_stack, *list_of_structs)
-        else:
-            # Fast path: simple numpy arrays or scalars — no tree traversal needed.
-            ret = fast_stack(*list_of_structs)
-
+    ret = graph_space_utils.map_structure(batch_func, *list_of_structs)
     return ret
 
 

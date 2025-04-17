@@ -481,7 +481,8 @@ class OfflinePreLearner:
                     # Append the last `new_obs` to get the correct length of
                     # observations.
                     obs.append(
-                        unpack_if_needed(batch[schema[Columns.NEXT_OBS]][i][-1])
+                        unpack_if_needed(
+                            batch[schema[Columns.NEXT_OBS]][i][-1])
                         if schema[Columns.OBS] in input_compress_columns
                         else batch[schema[Columns.NEXT_OBS]][i][-1]
                     )

@@ -180,12 +180,14 @@ class SingleAgentEpisode:
         self,
         id_: Optional[str] = None,
         *,
-        observations: Optional[Union[List[ObsType], InfiniteLookbackBuffer]] = None,
+        observations: Optional[Union[List[ObsType],
+                                     InfiniteLookbackBuffer]] = None,
         observation_space: Optional[gym.Space] = None,
         infos: Optional[Union[List[Dict], InfiniteLookbackBuffer]] = None,
         actions: Optional[Union[List[ActType], InfiniteLookbackBuffer]] = None,
         action_space: Optional[gym.Space] = None,
-        rewards: Optional[Union[List[SupportsFloat], InfiniteLookbackBuffer]] = None,
+        rewards: Optional[Union[List[SupportsFloat],
+                                InfiniteLookbackBuffer]] = None,
         terminated: bool = False,
         truncated: bool = False,
         extra_model_outputs: Optional[Dict[str, Any]] = None,
@@ -472,7 +474,8 @@ class SingleAgentEpisode:
         """
         assert len(self.observations) == len(self.infos)
         if len(self.observations) == 0:
-            assert len(self.infos) == len(self.rewards) == len(self.actions) == 0
+            assert len(self.infos) == len(
+                self.rewards) == len(self.actions) == 0
             for k, v in self.extra_model_outputs.items():
                 assert len(v) == 0, (k, v, v.data, len(v))
         # Make sure we always have one more obs stored than rewards (and actions)
@@ -653,7 +656,8 @@ class SingleAgentEpisode:
 
         for key in other.extra_model_outputs.keys():
             assert key in self.extra_model_outputs
-            self.extra_model_outputs[key].extend(other.get_extra_model_outputs(key))
+            self.extra_model_outputs[key].extend(
+                other.get_extra_model_outputs(key))
 
         # Merge with `other`'s custom_data, but give `other` priority b/c we assume
         # that as a follow-up chunk of `self` other has a more complete version of
@@ -1686,7 +1690,8 @@ class SingleAgentEpisode:
             A dict containing all the data from the episode.
         """
         infos = self.infos.get_state()
-        infos["data"] = np.array([info if info else None for info in infos["data"]])
+        infos["data"] = np.array(
+            [info if info else None for info in infos["data"]])
         return {
             "id_": self.id_,
             "agent_id": self.agent_id,
@@ -1735,7 +1740,8 @@ class SingleAgentEpisode:
         episode.module_id = state["module_id"]
         episode.multi_agent_episode_id = state["multi_agent_episode_id"]
         # Convert data back to `InfiniteLookbackBuffer`s.
-        episode.observations = InfiniteLookbackBuffer.from_state(state["observations"])
+        episode.observations = InfiniteLookbackBuffer.from_state(
+            state["observations"])
         episode.actions = InfiniteLookbackBuffer.from_state(state["actions"])
         episode.rewards = InfiniteLookbackBuffer.from_state(state["rewards"])
         episode.infos = InfiniteLookbackBuffer.from_state(state["infos"])
