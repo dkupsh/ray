@@ -5,6 +5,7 @@ import numpy as np
 import tree  # pip install dm_tree
 
 from ray.rllib.utils.annotations import DeveloperAPI
+from ray.rllib.utils.spaces import graph_space_utils
 
 
 @DeveloperAPI
@@ -62,6 +63,7 @@ def is_composite_space(space: gym.Space) -> bool:
         gym.spaces.Graph,
         gym.spaces.Sequence,
         gym.spaces.Tuple,
+        gym.spaces.GraphInstance
     ]:
         return True
     else:
@@ -354,13 +356,25 @@ def batch(
     # TODO (sven): Maybe replace this by a list-override (usage of which indicated
     #  this method that concatenate should be used (not stack)).
     if individual_items_already_have_batch_dim == "auto":
-        flat = tree.flatten(list_of_structs[0])
-        individual_items_already_have_batch_dim = isinstance(flat[0], BatchedNdArray)
+        flat = graph_space_utils.flatten(list_of_structs[0])
+        individual_items_already_have_batch_dim = isinstance(
+            flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
 
-    np_func = np.concatenate if individual_items_already_have_batch_dim else np.stack
-    ret = tree.map_structure(
-        lambda *s: np.ascontiguousarray(np_func(s, axis=0)), *list_of_structs
-    )
+    def batch_func(*s):
+        if isinstance(s[0], gym.spaces.GraphInstance):
+            return tuple([item for item in s])
+        elif isinstance(s[0], tuple) and isinstance(s[0][0], gym.spaces.GraphInstance):
+            list_of_instances = []
+            for i in s:
+                list_of_instances.extend([j for j in i])
+            return tuple(list_of_instances)
+
+        if individual_items_already_have_batch_dim:
+            return np.ascontiguousarray(np.concatenate(s, axis=0))
+        else:
+            return np.ascontiguousarray(np.stack(s, axis=0))
+
+    ret = graph_space_utils.map_structure(batch_func, *list_of_structs)
     return ret
 
 
