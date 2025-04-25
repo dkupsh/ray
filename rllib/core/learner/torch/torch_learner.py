@@ -346,11 +346,15 @@ class TorchLearner(Learner):
             if name not in self._named_optimizers and module_id in self.module:
                 self.configure_optimizers_for_module(
                     module_id=module_id,
-                    config=self.config.get_config_for_module(module_id=module_id),
+                    config=self.config.get_config_for_module(
+                        module_id=module_id),
                 )
             if name in self._named_optimizers:
+                optim_state_dict = {"state": convert_to_torch_tensor(state_dict["state"]["state"], device=self._device),
+                                    "param_groups": state_dict["state"]["param_groups"]}
+
                 self._named_optimizers[name].load_state_dict(
-                    convert_to_torch_tensor(state_dict["state"], device=self._device)
+                    optim_state_dict
                 )
 
     @override(Learner)
@@ -467,7 +471,8 @@ class TorchLearner(Learner):
         after setting up all variables because `configure_optimizer_for_module` is
         called in this `Learner.build()`.
         """
-        self._device = get_device(self.config, self.config.num_gpus_per_learner)
+        self._device = get_device(
+            self.config, self.config.num_gpus_per_learner)
 
         super().build()
 
@@ -595,7 +600,8 @@ class TorchLearner(Learner):
                 for p in rlm.parameters():
                     n = p.numel()
                     if p.requires_grad:
-                        num_trainable_params[(mid, NUM_TRAINABLE_PARAMETERS)] += n
+                        num_trainable_params[(
+                            mid, NUM_TRAINABLE_PARAMETERS)] += n
                     else:
                         num_non_trainable_params[
                             (mid, NUM_NON_TRAINABLE_PARAMETERS)
@@ -632,7 +638,8 @@ class TorchLearner(Learner):
             else:
                 mask = batch[mid][Columns.LOSS_MASK]
                 num_valid = torch.sum(mask)
-                off_policyness[key] = torch.sum(off_policyness[key][mask]) / num_valid
+                off_policyness[key] = torch.sum(
+                    off_policyness[key][mask]) / num_valid
         self.metrics.log_dict(off_policyness, window=1)
 
     @override(Learner)

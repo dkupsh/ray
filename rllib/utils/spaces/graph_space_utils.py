@@ -1,6 +1,7 @@
 import gymnasium as gym
 from collections.abc import Mapping
 import numpy as np
+import torch
 
 
 def map_structure(func, *structures, **kwargs):
@@ -274,7 +275,12 @@ def print_structure(structure, indent=0):
             print(" " * indent + f"Key: {key}")
             print_structure(structure[key], indent + 2)
     else:
-        print(" " * indent + f"Scalar: {type(structure)}")
+        if isinstance(structure, np.ndarray):
+            print(" " * indent + f"Array: {structure.shape}")
+        elif isinstance(structure, torch.Tensor):
+            print(" " * indent + f"Tensor: {structure.shape}")
+        else:
+            print(" " * indent + f"Scalar: {type(structure)}")
 
 
 def assert_same_structure(a, b, check_types=True):

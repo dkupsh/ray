@@ -41,8 +41,8 @@ def add_one_ts_to_episodes_and_truncate(episodes: List[SingleAgentEpisode]):
         episode.t += 1
         # Use the episode API that allows appending (possibly complex) structs
         # to the data.
-        episode.observations.append(episode.observations[-1])
-        episode.infos.append(episode.infos[-1])
+        episode.observations.insert(episode.observations[-2], -1)
+        episode.infos.insert(episode.infos[-2], -1)
         episode.actions.append(episode.actions[-1])
         episode.rewards.append(0.0)
         for v in episode.extra_model_outputs.values():
