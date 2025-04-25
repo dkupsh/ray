@@ -164,7 +164,8 @@ class AddObservationsFromEpisodesToBatch(ConnectorV2):
                     # column to the batch (ex. DQN) or extend the episode length by one
                     # (using a separate connector piece and this truncated last obs),
                     # then bootstrap the value estimation for that extra timestep.
-                    items_to_add=sa_episode.get_observations(slice(0, len(sa_episode))),
+                    items_to_add=sa_episode.get_observations(
+                        slice(0, len(sa_episode))),
                     num_items=len(sa_episode),
                     single_agent_episode=sa_episode,
                 )
