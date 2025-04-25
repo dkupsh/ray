@@ -108,6 +108,25 @@ class InfiniteLookbackBuffer:
         )
         return buffer
 
+    def insert(self, item, index: int) -> None:
+        """Inserts the given item at the given index into this buffer.
+
+        Args:
+            item: The item to insert.
+            index: The index at which to insert the item.
+        """
+        if self.finalized:
+            def _insert(d, i):
+                if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                    return d[:index] + i + d[index:]
+                return np.insert(d, index, i, axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _insert, self.data, item
+            )
+        else:
+            self.data.insert(index, item)
+
     def append(self, item) -> None:
         """Appends the given item to the end of this buffer."""
         if self.finalized:
