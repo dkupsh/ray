@@ -1826,13 +1826,18 @@ def _concat_values(*values, time_major=None) -> TensorType:
         time_major: Whether to concatenate along the first axis
             (time_major=False) or the second axis (time_major=True).
     """
+    from gymnasium.spaces.graph import GraphInstance
     if torch and torch.is_tensor(values[0]):
         return torch.cat(values, dim=1 if time_major else 0)
     elif isinstance(values[0], np.ndarray):
         return np.concatenate(values, axis=1 if time_major else 0)
     elif tf and tf.is_tensor(values[0]):
         return tf.concat(values, axis=1 if time_major else 0)
+    elif isinstance(values[0], GraphInstance):
+        return tuple(value for value in values)
     elif isinstance(values[0], tuple):
+        if isinstance(values[0][0], GraphInstance):
+            return tuple(element for value_2d in values for element in value_2d)
         return tuple([list(value) for value in values])
     elif isinstance(values[0], list):
         concatenated_list = []
