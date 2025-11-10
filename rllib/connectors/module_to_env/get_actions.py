@@ -76,7 +76,7 @@ class GetActions(ConnectorV2):
             else:
                 action_dist_class = sa_rl_module.get_inference_action_dist_cls()
             action_dist = action_dist_class.from_logits(
-                batch[Columns.ACTION_DIST_INPUTS],
+                batch[Columns.ACTION_DIST_INPUTS], model=sa_rl_module
             )
             if not explore:
                 action_dist = action_dist.to_deterministic()

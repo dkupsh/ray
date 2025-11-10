@@ -305,7 +305,8 @@ class Algorithm(Checkpointable, Trainable):
         *,
         # @OldAPIStack
         policy_ids: Optional[Collection[PolicyID]] = None,
-        policy_mapping_fn: Optional[Callable[[AgentID, EpisodeID], PolicyID]] = None,
+        policy_mapping_fn: Optional[Callable[[
+            AgentID, EpisodeID], PolicyID]] = None,
         policies_to_train: Optional[
             Union[
                 Collection[PolicyID],
@@ -476,7 +477,8 @@ class Algorithm(Checkpointable, Trainable):
             config.env, config
         )
         env_descr = (
-            self._env_id.__name__ if isinstance(self._env_id, type) else self._env_id
+            self._env_id.__name__ if isinstance(
+                self._env_id, type) else self._env_id
         )
 
         # Placeholder for a local replay buffer instance.
@@ -504,7 +506,8 @@ class Algorithm(Checkpointable, Trainable):
                 # Possible race condition if dir is created several times on
                 # rollout workers
                 os.makedirs(DEFAULT_STORAGE_PATH, exist_ok=True)
-            logdir = tempfile.mkdtemp(prefix=logdir_prefix, dir=DEFAULT_STORAGE_PATH)
+            logdir = tempfile.mkdtemp(
+                prefix=logdir_prefix, dir=DEFAULT_STORAGE_PATH)
 
             # Allow users to more precisely configure the created logger
             # via "logger_config.type".
@@ -778,13 +781,15 @@ class Algorithm(Checkpointable, Trainable):
 
         # Set Algorithm's seed after we have - if necessary - enabled
         # tf eager-execution.
-        update_global_seed_if_necessary(self.config.framework_str, self.config.seed)
+        update_global_seed_if_necessary(
+            self.config.framework_str, self.config.seed)
 
         self._record_usage(self.config)
 
         # Create the callbacks object.
         if self.config.enable_env_runner_and_connector_v2:
-            self.callbacks = [cls() for cls in force_list(self.config.callbacks_class)]
+            self.callbacks = [cls()
+                              for cls in force_list(self.config.callbacks_class)]
         else:
             self.callbacks = self.config.callbacks_class()
 
@@ -849,7 +854,8 @@ class Algorithm(Checkpointable, Trainable):
             self.env_runner_group = EnvRunnerGroup(
                 env_creator=self.env_creator,
                 validate_env=self.validate_env,
-                default_policy_class=self.get_default_policy_class(self.config),
+                default_policy_class=self.get_default_policy_class(
+                    self.config),
                 config=self.config,
                 # New API stack: User decides whether to create local env runner.
                 # Old API stack: Always create local EnvRunner.
@@ -882,7 +888,8 @@ class Algorithm(Checkpointable, Trainable):
             self.eval_env_runner_group: EnvRunnerGroup = EnvRunnerGroup(
                 env_creator=env_creator,
                 validate_env=None,
-                default_policy_class=self.get_default_policy_class(self.config),
+                default_policy_class=self.get_default_policy_class(
+                    self.config),
                 config=self.evaluation_config,
                 logdir=self.logdir,
                 tune_trial_id=self.trial_id,
@@ -951,7 +958,8 @@ class Algorithm(Checkpointable, Trainable):
                 policy = self.get_policy()
                 if issubclass(method_type, OffPolicyEstimator):
                     method_config["gamma"] = self.config.gamma
-                self.reward_estimators[name] = method_type(policy, **method_config)
+                self.reward_estimators[name] = method_type(
+                    policy, **method_config)
             else:
                 raise ValueError(
                     f"Unknown off_policy_estimation type: {method_type}! Must be "
@@ -1071,7 +1079,8 @@ class Algorithm(Checkpointable, Trainable):
                     self.offline_data.learner_handles = self.learner_group._workers
                 # Otherwise we can simply pass in the local learner.
                 else:
-                    self.offline_data.learner_handles = [self.learner_group._learner]
+                    self.offline_data.learner_handles = [
+                        self.learner_group._learner]
                 # TODO (simon, sven): Replace these set-some-object's-attributes-
                 # directly? We should find some solution for this in the future, an API,
                 # or setting these in the OfflineData constructor?
@@ -1686,7 +1695,8 @@ class Algorithm(Checkpointable, Trainable):
 
         env_steps = agent_steps = 0
 
-        logger.info(f"Evaluating current state of {self} for {duration} {unit}.")
+        logger.info(
+            f"Evaluating current state of {self} for {duration} {unit}.")
 
         all_batches = []
         if self.config.enable_env_runner_and_connector_v2:
@@ -2001,7 +2011,8 @@ class Algorithm(Checkpointable, Trainable):
                 num_timesteps=(
                     num[worker.worker_index] if unit == "timesteps" else None
                 ),
-                num_episodes=(num[worker.worker_index] if unit == "episodes" else None),
+                num_episodes=(num[worker.worker_index]
+                              if unit == "episodes" else None),
                 force_reset=_force_reset and round == 0,
             )
             metrics = worker.get_metrics()
@@ -2516,13 +2527,16 @@ class Algorithm(Checkpointable, Trainable):
         self.config.policies[module_id] = PolicySpec()
         if config_overrides is not None:
             self.config.multi_agent(
-                algorithm_config_overrides_per_module={module_id: config_overrides}
+                algorithm_config_overrides_per_module={
+                    module_id: config_overrides}
             )
         if new_agent_to_module_mapping_fn is not None:
-            self.config.multi_agent(policy_mapping_fn=new_agent_to_module_mapping_fn)
+            self.config.multi_agent(
+                policy_mapping_fn=new_agent_to_module_mapping_fn)
         self.config.rl_module(rl_module_spec=multi_rl_module_spec)
         if new_should_module_be_updated is not None:
-            self.config.multi_agent(policies_to_train=new_should_module_be_updated)
+            self.config.multi_agent(
+                policies_to_train=new_should_module_be_updated)
         self.config.freeze()
 
         def _add(_env_runner, _module_spec=module_spec):
@@ -2547,7 +2561,8 @@ class Algorithm(Checkpointable, Trainable):
         # Add to (training) EnvRunners and sync weights.
         if add_to_env_runners:
             if multi_rl_module_spec is None:
-                multi_rl_module_spec = self.env_runner_group.foreach_env_runner(_add)[0]
+                multi_rl_module_spec = self.env_runner_group.foreach_env_runner(_add)[
+                    0]
             else:
                 self.env_runner_group.foreach_env_runner(_add)
             self.env_runner_group.sync_weights(
@@ -2624,10 +2639,12 @@ class Algorithm(Checkpointable, Trainable):
         del self.config.policies[module_id]
         self.config.algorithm_config_overrides_per_module.pop(module_id, None)
         if new_agent_to_module_mapping_fn is not None:
-            self.config.multi_agent(policy_mapping_fn=new_agent_to_module_mapping_fn)
+            self.config.multi_agent(
+                policy_mapping_fn=new_agent_to_module_mapping_fn)
         self.config.rl_module(rl_module_spec=multi_rl_module_spec)
         if new_should_module_be_updated is not None:
-            self.config.multi_agent(policies_to_train=new_should_module_be_updated)
+            self.config.multi_agent(
+                policies_to_train=new_should_module_be_updated)
         self.config.freeze()
 
         def _remove(_env_runner):
@@ -2729,9 +2746,11 @@ class Algorithm(Checkpointable, Trainable):
         *,
         observation_space: Optional[gym.spaces.Space] = None,
         action_space: Optional[gym.spaces.Space] = None,
-        config: Optional[Union[AlgorithmConfig, PartialAlgorithmConfigDict]] = None,
+        config: Optional[Union[AlgorithmConfig,
+                               PartialAlgorithmConfigDict]] = None,
         policy_state: Optional[PolicyState] = None,
-        policy_mapping_fn: Optional[Callable[[AgentID, EpisodeID], PolicyID]] = None,
+        policy_mapping_fn: Optional[Callable[[
+            AgentID, EpisodeID], PolicyID]] = None,
         policies_to_train: Optional[
             Union[
                 Collection[PolicyID],
@@ -2910,7 +2929,8 @@ class Algorithm(Checkpointable, Trainable):
 
         # Update the evaluation worker set's workers, if required.
         if remove_from_eval_env_runners and self.eval_env_runner_group is not None:
-            self.eval_env_runner_group.foreach_env_runner(fn, local_env_runner=True)
+            self.eval_env_runner_group.foreach_env_runner(
+                fn, local_env_runner=True)
 
     @OldAPIStack
     @staticmethod
@@ -2984,7 +3004,8 @@ class Algorithm(Checkpointable, Trainable):
         """
         policy = self.get_policy(policy_id)
         if policy is None:
-            raise KeyError(f"Policy with ID {policy_id} not found in Algorithm!")
+            raise KeyError(
+                f"Policy with ID {policy_id} not found in Algorithm!")
         policy.export_checkpoint(export_dir)
 
     @override(Trainable)
@@ -3158,9 +3179,11 @@ class Algorithm(Checkpointable, Trainable):
             COMPONENT_EVAL_ENV_RUNNER, components, not_components
         ):
             state[COMPONENT_EVAL_ENV_RUNNER] = self.eval_env_runner.get_state(
-                components=self._get_subcomponents(COMPONENT_RL_MODULE, components),
+                components=self._get_subcomponents(
+                    COMPONENT_RL_MODULE, components),
                 not_components=force_list(
-                    self._get_subcomponents(COMPONENT_RL_MODULE, not_components)
+                    self._get_subcomponents(
+                        COMPONENT_RL_MODULE, not_components)
                 )
                 # We don't want the RLModule state from the EnvRunners (it's
                 # `inference_only` anyway and already provided in full by the Learners).
@@ -3171,7 +3194,8 @@ class Algorithm(Checkpointable, Trainable):
         # Get LearnerGroup state (w/ RLModule).
         if self._check_component(COMPONENT_LEARNER_GROUP, components, not_components):
             state[COMPONENT_LEARNER_GROUP] = self.learner_group.get_state(
-                components=self._get_subcomponents(COMPONENT_LEARNER_GROUP, components),
+                components=self._get_subcomponents(
+                    COMPONENT_LEARNER_GROUP, components),
                 not_components=self._get_subcomponents(
                     COMPONENT_LEARNER_GROUP, not_components
                 ),
@@ -3469,7 +3493,8 @@ class Algorithm(Checkpointable, Trainable):
                         env_obj = from_config(env_specifier, env_context)
                     except ValueError:
                         raise EnvError(
-                            ERR_MSG_INVALID_ENV_DESCRIPTOR.format(env_specifier)
+                            ERR_MSG_INVALID_ENV_DESCRIPTOR.format(
+                                env_specifier)
                         )
                     return env_obj
 
@@ -3590,7 +3615,8 @@ class Algorithm(Checkpointable, Trainable):
             now, time_this_iter, timestamp, debug_metrics_only
         )
         if "config" not in auto_filled:
-            raise KeyError("`config` key not found in auto-filled results dict!")
+            raise KeyError(
+                "`config` key not found in auto-filled results dict!")
 
         # If `config` key is no dict (but AlgorithmConfig object) ->
         # make sure, it's a dict to not break Tune APIs.
@@ -4062,7 +4088,8 @@ class Algorithm(Checkpointable, Trainable):
             config: Algorithm config dict.
         """
         record_extra_usage_tag(TagKey.RLLIB_FRAMEWORK, config["framework"])
-        record_extra_usage_tag(TagKey.RLLIB_NUM_WORKERS, str(config["num_env_runners"]))
+        record_extra_usage_tag(TagKey.RLLIB_NUM_WORKERS,
+                               str(config["num_env_runners"]))
         alg = self.__class__.__name__
         # We do not want to collect user defined algorithm names.
         if alg not in ALL_ALGORITHMS:
@@ -4085,7 +4112,8 @@ class Algorithm(Checkpointable, Trainable):
             exported[ExportFormat.MODEL] = path
         if ExportFormat.ONNX in export_formats:
             path = os.path.join(export_dir, ExportFormat.ONNX)
-            self.export_policy_model(path, onnx=int(os.getenv("ONNX_OPSET", "11")))
+            self.export_policy_model(
+                path, onnx=int(os.getenv("ONNX_OPSET", "11")))
             exported[ExportFormat.ONNX] = path
         return exported
 
@@ -4170,7 +4198,8 @@ class Algorithm(Checkpointable, Trainable):
 
                 # If evaluation workers are used, also restore the policies
                 # there in case they are used for evaluation purpose.
-                self.eval_env_runner_group.foreach_env_runner(_setup_eval_worker)
+                self.eval_env_runner_group.foreach_env_runner(
+                    _setup_eval_worker)
 
         # Restore replay buffer data.
         if self.local_replay_buffer is not None:
@@ -4178,7 +4207,8 @@ class Algorithm(Checkpointable, Trainable):
             #  buffer from checkpoint, only if user has configured this.
             if self.config.store_buffer_in_checkpoints:
                 if "local_replay_buffer" in state:
-                    self.local_replay_buffer.set_state(state["local_replay_buffer"])
+                    self.local_replay_buffer.set_state(
+                        state["local_replay_buffer"])
                 else:
                     logger.warning(
                         "`store_buffer_in_checkpoints` is True, but no replay "
@@ -4204,7 +4234,8 @@ class Algorithm(Checkpointable, Trainable):
         checkpoint_info: dict,
         *,
         policy_ids: Optional[Collection[PolicyID]] = None,
-        policy_mapping_fn: Optional[Callable[[AgentID, EpisodeID], PolicyID]] = None,
+        policy_mapping_fn: Optional[Callable[[
+            AgentID, EpisodeID], PolicyID]] = None,
         policies_to_train: Optional[
             Union[
                 Collection[PolicyID],
@@ -4292,7 +4323,8 @@ class Algorithm(Checkpointable, Trainable):
             # Remove policies from multiagent dict that are not in `policy_ids`.
             new_policies = new_config.policies
             if isinstance(new_policies, (set, list, tuple)):
-                new_policies = {pid for pid in new_policies if pid in policy_ids}
+                new_policies = {
+                    pid for pid in new_policies if pid in policy_ids}
             else:
                 new_policies = {
                     pid: spec for pid, spec in new_policies.items() if pid in policy_ids
@@ -4438,7 +4470,8 @@ class Algorithm(Checkpointable, Trainable):
         )
         # We have to add some older episodes to reach the smoothing window size.
         if missing > 0:
-            episodes_for_metrics = self._episode_history[-missing:] + episodes_this_iter
+            episodes_for_metrics = self._episode_history[-missing:] + \
+                episodes_this_iter
             assert (
                 len(episodes_for_metrics)
                 <= self.config.metrics_num_episodes_for_smoothing
@@ -4451,7 +4484,7 @@ class Algorithm(Checkpointable, Trainable):
         # needed.
         self._episode_history.extend(episodes_this_iter)
         self._episode_history = self._episode_history[
-            -self.config.metrics_num_episodes_for_smoothing :
+            -self.config.metrics_num_episodes_for_smoothing:
         ]
         results[ENV_RUNNER_RESULTS] = summarize_episodes(
             episodes_for_metrics,
@@ -4516,7 +4549,8 @@ class Algorithm(Checkpointable, Trainable):
         for k, timer in self._timers.items():
             timers["{}_time_ms".format(k)] = round(timer.mean * 1000, 3)
             if timer.has_units_processed():
-                timers["{}_throughput".format(k)] = round(timer.mean_throughput, 3)
+                timers["{}_throughput".format(k)] = round(
+                    timer.mean_throughput, 3)
         results["timers"] = timers
 
         # Process counter results.
@@ -4593,7 +4627,8 @@ class Algorithm(Checkpointable, Trainable):
                     f"np.ndarray."
                 )
         if pp:
-            assert len(pp) == 1, "Only one preprocessor should be in the pipeline"
+            assert len(
+                pp) == 1, "Only one preprocessor should be in the pipeline"
             pp = pp[0]
 
             if not pp.is_identity():
@@ -4633,9 +4668,11 @@ class Algorithm(Checkpointable, Trainable):
             )
 
         if unsquash_action:
-            action = space_utils.unsquash_action(action, policy.action_space_struct)
+            action = space_utils.unsquash_action(
+                action, policy.action_space_struct)
         elif clip_action:
-            action = space_utils.clip_action(action, policy.action_space_struct)
+            action = space_utils.clip_action(
+                action, policy.action_space_struct)
 
         if state or full_fetch:
             return action, state, extra
@@ -4847,7 +4884,8 @@ class TrainIterCtx:
                 )
                 self.trained = (
                     self.algo.metrics.peek(
-                        (LEARNER_RESULTS, ALL_MODULES, NUM_ENV_STEPS_TRAINED_LIFETIME),
+                        (LEARNER_RESULTS, ALL_MODULES,
+                         NUM_ENV_STEPS_TRAINED_LIFETIME),
                         default=0,
                     )
                     - self.init_env_steps_trained
