@@ -118,7 +118,8 @@ class RLModuleSpec:
         from ray.rllib.core.rl_module.multi_rl_module import MultiRLModule
 
         if isinstance(module, MultiRLModule):
-            raise ValueError("MultiRLModule cannot be converted to RLModuleSpec.")
+            raise ValueError(
+                "MultiRLModule cannot be converted to RLModuleSpec.")
 
         # Try instantiating a new RLModule from the spec using the new c'tor args.
         try:
@@ -422,7 +423,33 @@ class RLModule(Checkpointable, abc.ABC):
         self.catalog = None
         self._catalog_ctor_error = None
 
+        self.observation_space = observation_space
+        self.action_space = action_space
+        self.inference_only = inference_only
+        self.learner_only = learner_only
+        self.model_config = model_config
+        if catalog_class is not None:
+            try:
+                self.catalog = catalog_class(
+                    observation_space=self.observation_space,
+                    action_space=self.action_space,
+                    model_config_dict=self.model_config,
+                )
+            except Exception as e:
+                logger.warning(
+                    "Didn't create a Catalog object for your RLModule! If you are "
+                    "not using the new API stack yet, make sure to switch it off in"
+                    " your config: `config.api_stack(enable_rl_module_and_learner="
+                    "False, enable_env_runner_and_connector_v2=False)`. All algos "
+                    "use the new stack by default. Ignore this message, if your "
+                    "RLModule does not use a Catalog to build its sub-components."
+                )
+                self._catalog_ctor_error = e
+
         # Deprecated
+        '''
+
+        
         self.config = config
         if self.config != DEPRECATED_VALUE:
             deprecation_warning(
@@ -456,6 +483,7 @@ class RLModule(Checkpointable, abc.ABC):
                         "RLModule does not use a Catalog to build its sub-components."
                     )
                     self._catalog_ctor_error = e
+        '''
 
         # TODO (sven): Deprecate this. We keep it here for now in case users
         #  still have custom models (or subclasses of RLlib default models)

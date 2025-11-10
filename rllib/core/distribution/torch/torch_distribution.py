@@ -138,6 +138,11 @@ class TorchCategorical(TorchDistribution):
             logits=logits, probs=probs, validate_args=False
         )
 
+    @classmethod
+    @override(Distribution)
+    def from_logits(cls, logits: TensorType, **kwargs) -> "TorchCategorical":
+        return TorchCategorical(logits=logits, probs=kwargs.get("probs", None))
+
     @staticmethod
     @override(Distribution)
     def required_input_dim(space: gym.Space, **kwargs) -> int:
