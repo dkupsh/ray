@@ -151,7 +151,7 @@ class TorchCategorical(TorchDistribution):
     @classmethod
     @override(Distribution)
     def from_logits(cls, logits: TensorType, **kwargs) -> "TorchCategorical":
-        return TorchCategorical(logits=logits, **kwargs)
+        return TorchCategorical(logits=logits, probs=kwargs.get("probs", None))
 
     def to_deterministic(self) -> "TorchDeterministic":
         if self.probs is not None:
@@ -303,7 +303,8 @@ class TorchSquashedGaussian(TorchDistribution):
 
     def _squash(self, sample: TensorType) -> TensorType:
         # Rescale the sample to interval given by the bounds (including the bounds).
-        sample = ((torch.tanh(sample) + 1.0) / 2.0) * (self.high - self.low) + self.low
+        sample = ((torch.tanh(sample) + 1.0) / 2.0) * \
+            (self.high - self.low) + self.low
         # Return a clipped sample to comply with the bounds.
         return torch.clamp(sample, self.low, self.high)
 
@@ -396,11 +397,13 @@ class TorchDeterministic(Distribution):
 
     @override(Distribution)
     def entropy(self, **kwargs) -> TensorType:
-        raise RuntimeError(f"`entropy()` not supported for {self.__class__.__name__}.")
+        raise RuntimeError(
+            f"`entropy()` not supported for {self.__class__.__name__}.")
 
     @override(Distribution)
     def kl(self, other: "Distribution", **kwargs) -> TensorType:
-        raise RuntimeError(f"`kl()` not supported for {self.__class__.__name__}.")
+        raise RuntimeError(
+            f"`kl()` not supported for {self.__class__.__name__}.")
 
     @staticmethod
     @override(Distribution)
@@ -444,7 +447,8 @@ class TorchMultiCategorical(Distribution):
     @override(Distribution)
     def logp(self, value: "torch.Tensor") -> TensorType:
         value = torch.unbind(value, dim=-1)
-        logps = torch.stack([cat.logp(act) for cat, act in zip(self._cats, value)])
+        logps = torch.stack([cat.logp(act)
+                            for cat, act in zip(self._cats, value)])
         return torch.sum(logps, dim=0)
 
     @override(Distribution)
@@ -538,7 +542,8 @@ class TorchMultiDistribution(Distribution):
         """
         super().__init__()
         self._original_struct = child_distribution_struct
-        self._flat_child_distributions = tree.flatten(child_distribution_struct)
+        self._flat_child_distributions = tree.flatten(
+            child_distribution_struct)
 
     @override(Distribution)
     def rsample(
@@ -657,7 +662,8 @@ class TorchMultiDistribution(Distribution):
             A TorchMultiDistribution object.
         """
         logit_lens = tree.flatten(input_lens)
-        child_distribution_cls_list = tree.flatten(child_distribution_cls_struct)
+        child_distribution_cls_list = tree.flatten(
+            child_distribution_cls_struct)
         split_logits = torch.split(logits, logit_lens, dim=-1)
 
         child_distribution_list = tree.map_structure(
