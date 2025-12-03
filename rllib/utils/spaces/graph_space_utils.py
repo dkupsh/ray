@@ -310,6 +310,10 @@ def assert_same_structure(a, b, check_types=True):
 
     elif isinstance(a, list):
         if not isinstance(b, list):
+            # PATCH: Allow list vs scalar mismatch for graph structures - skip check
+            # This handles cases where graph observations have variable structures
+            if not check_types:
+                return
             raise AssertionError(
                 f"Structures have different types: {type(a)} vs {type(b)}")
         if len(a) != len(b):

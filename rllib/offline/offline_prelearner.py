@@ -178,16 +178,23 @@ class OfflinePreLearner:
             A flattened dict representing a batch that can be passed to `Learner.update` methods.
         """
         if self.config.input_read_episodes:
-            import msgpack
-            import msgpack_numpy as mnp
+            def gather_episodes(batch):
+                batches = len(batch[list(batch.keys())[0]])
+                episodes = []
 
-            # Read the episodes and decode them.
-            episodes: List[SingleAgentEpisode] = [
-                SingleAgentEpisode.from_state(
-                    msgpack.unpackb(state, object_hook=mnp.decode)
-                )
-                for state in batch["item"]
-            ]
+                for i in range(batches):
+                    state = {
+                        key: batch[key][i]
+                        for key in batch
+                    }
+                    episode = SingleAgentEpisode.from_state(
+                        state
+                    )
+                    episodes.append(episode)
+
+                return episodes
+
+            episodes: List[SingleAgentEpisode] = gather_episodes(batch)
             episodes = self._postprocess_and_sample(episodes)
 
         elif self.config.input_read_sample_batches:
