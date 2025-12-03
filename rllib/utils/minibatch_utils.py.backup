@@ -198,19 +198,12 @@ class MiniBatchRayDataIterator:
     def __iter__(self):
         iter = 0
         while self._num_iters is None or iter < self._num_iters:
-            # Filter out unsupported parameters for Ray Data's iter_batches()
-            # The 'return_state' parameter is not supported in this version
-            filtered_kwargs = {
-                k: v for k, v in self._kwargs.items()
-                if k not in ['return_state']
-            }
-
             for batch in self._iterator.iter_batches(
                 # Note, this needs to be one b/c data is already mapped to
                 # `MultiAgentBatch`es of `minibatch_size`.
                 batch_size=1,
                 _finalize_fn=self._finalize_fn,
-                **filtered_kwargs,
+                **self._kwargs,
             ):
                 # Update the iteration counter.
                 iter += 1

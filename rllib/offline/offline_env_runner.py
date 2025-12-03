@@ -69,7 +69,8 @@ class OfflineSingleAgentEnvRunner(SingleAgentEnvRunner):
         if self.filesystem == "gcs":
             import gcsfs
 
-            self.filesystem_object = gcsfs.GCSFileSystem(**self.filesystem_kwargs)
+            self.filesystem_object = gcsfs.GCSFileSystem(
+                **self.filesystem_kwargs)
         elif self.filesystem == "s3":
             from pyarrow import fs
 
@@ -77,7 +78,8 @@ class OfflineSingleAgentEnvRunner(SingleAgentEnvRunner):
         elif self.filesystem == "abs":
             import adlfs
 
-            self.filesystem_object = adlfs.AzureBlobFileSystem(**self.filesystem_kwargs)
+            self.filesystem_object = adlfs.AzureBlobFileSystem(
+                **self.filesystem_kwargs)
         elif self.filesystem is not None:
             raise ValueError(
                 f"Unknown filesystem: {self.filesystem}. Filesystems can be "
@@ -156,7 +158,8 @@ class OfflineSingleAgentEnvRunner(SingleAgentEnvRunner):
             # Note, we serialize episodes with `msgpack` and `msgpack_numpy` to
             # ensure version compatibility.
             self._samples.extend(
-                [msgpack.packb(eps.get_state(), default=mnp.encode) for eps in samples]
+                [msgpack.packb(eps.get_state(), default=mnp.encode)
+                 for eps in samples]
             )
         else:
             self._map_episodes_to_data(samples)
@@ -180,11 +183,12 @@ class OfflineSingleAgentEnvRunner(SingleAgentEnvRunner):
                 while len(self._samples) >= self.output_max_rows_per_file:
                     # Extract the number of samples to be written to disk this
                     # iteration.
-                    samples_to_write = self._samples[: self.output_max_rows_per_file]
+                    samples_to_write = self._samples[:
+                                                     self.output_max_rows_per_file]
                     # Reset the buffer to the remaining data. This only makes sense, if
                     # `rollout_fragment_length` is smaller `output_max_rows_per_file` or
                     # a 2 x `output_max_rows_per_file`.
-                    self._samples = self._samples[self.output_max_rows_per_file :]
+                    self._samples = self._samples[self.output_max_rows_per_file:]
                     samples_ds = ray.data.from_items(samples_to_write)
             # Otherwise, write the complete data.
             else:
@@ -274,20 +278,23 @@ class OfflineSingleAgentEnvRunner(SingleAgentEnvRunner):
                     Columns.MODULE_ID: sample.module_id,
                     # Compress observations, if requested.
                     Columns.OBS: pack_if_needed(
-                        to_jsonable_if_needed(sample.get_observations(i), obs_space)
+                        to_jsonable_if_needed(
+                            sample.get_observations(i), obs_space)
                     )
                     if Columns.OBS in self.output_compress_columns
                     else to_jsonable_if_needed(sample.get_observations(i), obs_space),
                     # Compress actions, if requested.
                     Columns.ACTIONS: pack_if_needed(
-                        to_jsonable_if_needed(sample.get_actions(i), action_space)
+                        to_jsonable_if_needed(
+                            sample.get_actions(i), action_space)
                     )
                     if Columns.ACTIONS in self.output_compress_columns
                     else to_jsonable_if_needed(sample.get_actions(i), action_space),
                     Columns.REWARDS: sample.get_rewards(i),
                     # Compress next observations, if requested.
                     Columns.NEXT_OBS: pack_if_needed(
-                        to_jsonable_if_needed(sample.get_observations(i + 1), obs_space)
+                        to_jsonable_if_needed(
+                            sample.get_observations(i + 1), obs_space)
                     )
                     if Columns.OBS in self.output_compress_columns
                     else to_jsonable_if_needed(

@@ -115,8 +115,12 @@ class AddOneTsToEpisodesAndTruncate(ConnectorV2):
                 for sa_episode in ma_episode.agent_episodes.values():
                     sa_episode.multi_agent_episode_id = ma_episode.id_
 
+        loss_mask_exists = shared_data.get(
+            "_added_loss_mask_for_valid_episode_ts", False)
+
         for i, sa_episode in enumerate(
-            self.single_agent_episode_iterator(episodes, agents_that_stepped_only=False)
+            self.single_agent_episode_iterator(
+                episodes, agents_that_stepped_only=False)
         ):
             # TODO (sven): This is a little bit of a hack: By extending the Episode's
             #  ID, we make sure that each episode chunk in `episodes` is treated as a
@@ -137,15 +141,22 @@ class AddOneTsToEpisodesAndTruncate(ConnectorV2):
 
             # Extend all episodes by one ts.
             add_one_ts_to_episodes_and_truncate([sa_episode])
-
-            loss_mask = [True for _ in range(len_)] + [False]
-            self.add_n_batch_items(
-                batch,
-                Columns.LOSS_MASK,
-                loss_mask,
-                len_ + 1,
-                sa_episode,
-            )
+            if not loss_mask_exists:
+                loss_mask = [True for _ in range(len_)] + [False]
+                self.add_n_batch_items(
+                    batch,
+                    Columns.LOSS_MASK,
+                    loss_mask,
+                    len_ + 1,
+                    sa_episode,
+                )
+            else:
+                self.add_batch_item(
+                    batch,
+                    Columns.LOSS_MASK,
+                    False,
+                    sa_episode,
+                )
 
             terminateds = (
                 [False for _ in range(len_ - 1)]

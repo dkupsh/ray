@@ -199,10 +199,12 @@ class Stats:
         """
         # Thus far, we only support mean, max, min, and sum.
         if reduce not in [None, "mean", "min", "max", "sum"]:
-            raise ValueError("`reduce` must be one of `mean|min|max|sum` or None!")
+            raise ValueError(
+                "`reduce` must be one of `mean|min|max|sum` or None!")
         # One or both window and ema_coeff must be None.
         if window is not None and ema_coeff is not None:
-            raise ValueError("Only one of `window` or `ema_coeff` can be specified!")
+            raise ValueError(
+                "Only one of `window` or `ema_coeff` can be specified!")
         # If `ema_coeff` is provided, `reduce` must be "mean".
         if ema_coeff is not None and reduce != "mean":
             raise ValueError(
@@ -376,7 +378,8 @@ class Stats:
             self._reduce_method,
             other._reduce_method,
         )
-        assert self._ema_coeff == other._ema_coeff, (self._ema_coeff, other._ema_coeff)
+        assert self._ema_coeff == other._ema_coeff, (
+            self._ema_coeff, other._ema_coeff)
         if self._window != other._window:
             self._window = other._window
 
@@ -556,7 +559,8 @@ class Stats:
                 new_values.extend(tmp_values)
             else:
                 new_values.extend(
-                    [self._reduced_values(values=tmp_values)[0]] * len(tmp_values)
+                    [self._reduced_values(values=tmp_values)[
+                        0]] * len(tmp_values)
                 )
             tmp_values.clear()
             if len(new_values) >= win:
@@ -722,7 +726,8 @@ class Stats:
             # Perform EMA reduction over all values in internal values list.
             mean_value = values[0]
             for v in values[1:]:
-                mean_value = self._ema_coeff * v + (1.0 - self._ema_coeff) * mean_value
+                mean_value = self._ema_coeff * v + \
+                    (1.0 - self._ema_coeff) * mean_value
             if self._inf_window:
                 return mean_value, [mean_value]
             else:

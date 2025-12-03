@@ -947,7 +947,8 @@ class MetricsLogger:
         assert self.tensor_mode
         self._tensor_mode = False
         # Return all logged tensors (logged during the tensor-mode phase).
-        logged_tensors = {key: self._get_key(key).peek() for key in self._tensor_keys}
+        logged_tensors = {key: self._get_key(
+            key).peek() for key in self._tensor_keys}
         # Clear out logged tensor keys.
         self._tensor_keys.clear()
         return logged_tensors
@@ -1091,7 +1092,8 @@ class MetricsLogger:
         """
         with self._threading_lock:
             for flat_key, stats_state in state["stats"].items():
-                self._set_key(flat_key.split("--"), Stats.from_state(stats_state))
+                self._set_key(flat_key.split("--"),
+                              Stats.from_state(stats_state))
 
     def _check_tensor(self, key: Tuple[str], value) -> None:
         # `value` is a tensor -> Log it in our keys set.

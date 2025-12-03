@@ -154,13 +154,31 @@ class OfflinePreLearner:
             import msgpack
             import msgpack_numpy as mnp
 
+            def gather_episodes(batch):
+                batches = len(batch[list(batch.keys())[0]])
+                episodes = []
+
+                for i in range(batches):
+                    state = {
+                        key: batch[key][i]
+                        for key in batch
+                    }
+                    episode = SingleAgentEpisode.from_state(
+                        state
+                    )
+                    episodes.append(episode)
+
+                return episodes
+
+            episodes: List[SingleAgentEpisode] = gather_episodes(batch)
+
             # Read the episodes and decode them.
-            episodes: List[SingleAgentEpisode] = [
-                SingleAgentEpisode.from_state(
-                    msgpack.unpackb(state, object_hook=mnp.decode)
-                )
-                for state in batch["item"]
-            ]
+            # episodes: List[SingleAgentEpisode] = [
+            #    SingleAgentEpisode.from_state(
+            #        msgpack.unpackb(state, object_hook=mnp.decode)
+            #    )
+            #    for state in batch["item"]
+            # ]
 
             # Ensure that all episodes are done and no duplicates are in the batch.
             episodes = self._validate_episodes(episodes)
