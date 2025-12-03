@@ -666,6 +666,17 @@ class SingleAgentEpisode:
         # Validate.
         self.validate()
 
+    def remove_steps(self, steps: list[int]) -> None:
+        for step in sorted(steps, reverse=True):
+            self.observations.pop(step)
+            self.actions.pop(step)
+            self.rewards.pop(step)
+            self.infos.pop(step)
+            for key in self.extra_model_outputs.keys():
+                self.extra_model_outputs[key].pop(step)
+            self.t -= 1
+        self.validate()
+
     def cut(self, len_lookback_buffer: int = 0) -> "SingleAgentEpisode":
         """Returns a successor episode chunk (of len=0) continuing from this Episode.
 

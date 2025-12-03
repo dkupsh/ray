@@ -375,9 +375,15 @@ def batch(
             return np.ascontiguousarray(np.stack(s, axis=0))
 
     np_func = np.concatenate if individual_items_already_have_batch_dim else np.stack
-    ret = graph_space_utils.map_structure(
-        batch_func, *list_of_structs
-    )
+    # PATCH: Disable strict type checking for graph structures to allow variable structures
+    try:
+        ret = graph_space_utils.map_structure(
+            batch_func, *list_of_structs, check_types=False
+        )
+    except Exception as e:
+        graph_space_utils.print_structure(list_of_structs)
+        print(f"Error during batching: {e}")
+        raise
 
     return ret
 

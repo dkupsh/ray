@@ -815,12 +815,6 @@ class RLModule(Checkpointable, abc.ABC):
         pass
 
 
-@Deprecated(
-    old="RLModule(config=[RLModuleConfig object])",
-    new="RLModule(observation_space=.., action_space=.., inference_only=.., "
-    "model_config=.., catalog_class=..)",
-    error=False,
-)
 @dataclass
 class RLModuleConfig:
     observation_space: gym.Space = None
