@@ -149,20 +149,24 @@ class OfflinePreLearner:
         Returns:
             A `MultiAgentBatch` that can be passed to `Learner.update` methods.
         """
-        # If we directly read in episodes we just convert to list.
-        if self.input_read_episodes:
-            # Import `msgpack` for decoding.
-            import msgpack
-            import msgpack_numpy as mnp
+        if self.config.input_read_episodes:
+            def gather_episodes(batch):
+                batches = len(batch[list(batch.keys())[0]])
+                episodes = []
 
-            # Read the episodes and decode them.
-            episodes: List[SingleAgentEpisode] = [
-                SingleAgentEpisode.from_state(
-                    msgpack.unpackb(state, object_hook=mnp.decode)
-                )
-                for state in batch["item"]
-            ]
-            # Postprocess and sample from the buffer.
+                for i in range(batches):
+                    state = {
+                        key: batch[key][i]
+                        for key in batch
+                    }
+                    episode = SingleAgentEpisode.from_state(
+                        state
+                    )
+                    episodes.append(episode)
+
+                return episodes
+
+            episodes: List[SingleAgentEpisode] = gather_episodes(batch)
             episodes = self._postprocess_and_sample(episodes)
 
         # Else, if we have old stack `SampleBatch`es.
