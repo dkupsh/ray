@@ -515,6 +515,7 @@ class AlgorithmConfig(_Config):
 
         # `self.evaluation()`
         self.evaluation_interval = None
+        self.evaluation_on_start = False
         self.evaluation_duration = 10
         self.evaluation_duration_unit = "episodes"
         self.evaluation_sample_timeout_s = 120.0
@@ -2425,7 +2426,8 @@ class AlgorithmConfig(_Config):
         ] = NotProvided,
         add_default_connectors_to_learner_pipeline: Optional[bool] = NotProvided,
         learner_config_dict: Optional[Dict[str, Any]] = NotProvided,
-    ) -> Self:
+        **kwargs
+    ) -> "AlgorithmConfig":
         """Sets the training related configuration.
 
         Args:
@@ -2760,6 +2762,7 @@ class AlgorithmConfig(_Config):
         self,
         *,
         evaluation_interval: Optional[int] = NotProvided,
+        evaluation_on_start: Optional[bool] = NotProvided,
         evaluation_duration: Optional[Union[int, str]] = NotProvided,
         evaluation_duration_unit: Optional[str] = NotProvided,
         evaluation_auto_duration_min_env_steps_per_sample: Optional[int] = NotProvided,
@@ -3006,6 +3009,8 @@ class AlgorithmConfig(_Config):
 
         if evaluation_interval is not NotProvided:
             self.evaluation_interval = evaluation_interval
+        if evaluation_on_start is not NotProvided:
+            self.evaluation_on_start = evaluation_on_start
         if evaluation_duration is not NotProvided:
             self.evaluation_duration = evaluation_duration
         if evaluation_duration_unit is not NotProvided:
