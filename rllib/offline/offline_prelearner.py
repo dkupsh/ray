@@ -177,22 +177,53 @@ class OfflinePreLearner:
         Returns:
             A flattened dict representing a batch that can be passed to `Learner.update` methods.
         """
+        # If we directly read in episodes we just convert to list.
         if self.config.input_read_episodes:
+            # Import `msgpack` for decoding.
+            import msgpack
+            import msgpack_numpy as mnp
+            import zlib
+
+
             def gather_episodes(batch):
-                batches = len(batch[list(batch.keys())[0]])
-                episodes = []
+                # Check if we have compressed episodes in 'episode_data' field
+                if 'episode_data' in batch:
+                    # Handle compressed and serialized episodes
+                    episodes = []
+                    episode_data_list = batch['episode_data']
 
-                for i in range(batches):
-                    state = {
-                        key: batch[key][i]
-                        for key in batch
-                    }
-                    episode = SingleAgentEpisode.from_state(
-                        state
-                    )
-                    episodes.append(episode)
+                    for compressed_episode in episode_data_list:
+                        try:
+                            # Decompress the episode
+                            serialized_episode = zlib.decompress(compressed_episode)
 
-                return episodes
+                            # Deserialize with msgpack-numpy
+                            episode_state = mnp.unpackb(serialized_episode, object_hook=mnp.decode)
+
+                            # Create episode from state
+                            episode = SingleAgentEpisode.from_state(episode_state)
+                            episodes.append(episode)
+                        except Exception as e:
+                            logger.warning(f"Failed to deserialize episode: {e}")
+                            continue
+
+                    return episodes
+                else:
+                    # Original logic for non-compressed episodes
+                    batches = len(batch[list(batch.keys())[0]])
+                    episodes = []
+
+                    for i in range(batches):
+                        state = {
+                            key: batch[key][i]
+                            for key in batch
+                        }
+                        episode = SingleAgentEpisode.from_state(
+                            state
+                        )
+                        episodes.append(episode)
+
+                    return episodes
 
             episodes: List[SingleAgentEpisode] = gather_episodes(batch)
             episodes = self._postprocess_and_sample(episodes)

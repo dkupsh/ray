@@ -361,9 +361,11 @@ def batch(
             flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
 
     def batch_func(*s):
+        # PATCH: Handle GraphInstances and lists of GraphInstances specially
+        # GraphInstances should be batched as tuples, not stacked
         if isinstance(s[0], gym.spaces.GraphInstance):
             return tuple([item for item in s])
-        elif isinstance(s[0], tuple) and isinstance(s[0][0], gym.spaces.GraphInstance):
+        elif isinstance(s[0], tuple) and len(s[0]) > 0 and isinstance(s[0][0], gym.spaces.GraphInstance):
             list_of_instances = []
             for i in s:
                 list_of_instances.extend([j for j in i])

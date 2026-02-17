@@ -44,7 +44,7 @@ def convert_list_to_graph_structure(structure):
         else:
             return tuple(convert_list_to_graph_structure(sub) for sub in structure)
     elif isinstance(structure, list):
-        if len(structure) == 3 and all(isinstance(sub, np.ndarray) for sub in structure):
+        if len(structure) == 3 and all(isinstance(sub, np.ndarray) or sub is None for sub in structure):
             return gym.spaces.GraphInstance(
                 structure[0], structure[1], structure[2]
             )
@@ -256,31 +256,47 @@ def map_structure_with_path(func, *structures, **kwargs):
 
 
 def print_structure(structure, indent=0):
+    """Recursively print the structure of nested data with indentation."""
+    prefix = "  " * indent
+
     if isinstance(structure, gym.spaces.GraphInstance):
-        print(" " * indent + f"GraphInstance")
+        nodes_shape = structure.nodes.shape if structure.nodes is not None else None
+        edges_shape = structure.edges.shape if structure.edges is not None else None
+        edge_links_shape = structure.edge_links.shape if structure.edge_links is not None else None
+        print(f"{prefix}GraphInstance(nodes: {nodes_shape}, edges: {edges_shape}, edge_links: {edge_links_shape})")
+
     elif isinstance(structure, tuple):
         if len(structure) > 0 and isinstance(structure[0], gym.spaces.GraphInstance):
-            print(" " * indent + f"Tuple: GraphInstances")
+            print(f"{prefix}Tuple of {len(structure)} GraphInstance(s):")
+            for i, item in enumerate(structure):
+                print(f"{prefix}  [{i}]:")
+                print_structure(item, indent + 2)
         else:
-            print(" " * indent + "Tuple: ")
-            for sub in structure:
-                print_structure(sub, indent + 2)
+            print(f"{prefix}Tuple (length {len(structure)}):")
+            for i, item in enumerate(structure):
+                print(f"{prefix}  [{i}]:")
+                print_structure(item, indent + 2)
+
     elif isinstance(structure, list):
-        print(" " * indent + "List:")
-        for sub in structure:
-            print_structure(sub, indent + 2)
+        print(f"{prefix}List (length {len(structure)}):")
+        for i, item in enumerate(structure):
+            print(f"{prefix}  [{i}]:")
+            print_structure(item, indent + 2)
+
     elif isinstance(structure, Mapping):
-        print(" " * indent + "Dict:")
+        print(f"{prefix}Dict (keys: {list(structure.keys())}):")
         for key in sorted(structure.keys()):
-            print(" " * indent + f"Key: {key}")
+            print(f"{prefix}  '{key}':")
             print_structure(structure[key], indent + 2)
+
+    elif isinstance(structure, (np.ndarray, torch.Tensor)):
+        type_name = "ndarray" if isinstance(
+            structure, np.ndarray) else "Tensor"
+        print(
+            f"{prefix}{type_name}(shape: {structure.shape}, dtype: {structure.dtype})")
+
     else:
-        if isinstance(structure, np.ndarray):
-            print(" " * indent + f"Array: {structure.shape}")
-        elif isinstance(structure, torch.Tensor):
-            print(" " * indent + f"Tensor: {structure.shape}")
-        else:
-            print(" " * indent + f"Scalar: {type(structure)}")
+        print(f"{prefix}{type(structure).__name__}: {structure}")
 
 
 def assert_same_structure(a, b, check_types=True):
