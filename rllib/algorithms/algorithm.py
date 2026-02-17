@@ -1253,6 +1253,9 @@ class Algorithm(Checkpointable, Trainable):
                 and (self.iteration + 1) % self.config.offline_evaluation_interval == 0
             )
 
+        if self.config.evaluation_interval and (self.iteration == 0 and self.config.evaluation_interval > 0 and self.config.evaluation_on_start):
+            evaluate_this_iter = True
+
             # Results dict for training (and if appolicable: evaluation).
             eval_results: ResultDict = {}
 
