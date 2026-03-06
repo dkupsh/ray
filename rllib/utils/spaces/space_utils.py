@@ -63,7 +63,7 @@ def is_composite_space(space: gym.Space) -> bool:
         gym.spaces.Graph,
         gym.spaces.Sequence,
         gym.spaces.Tuple,
-        gym.spaces.GraphInstance
+        gym.spaces.GraphInstance,
     ]:
         return True
     else:
@@ -212,7 +212,6 @@ def get_dummy_batch_for_space(
             edge_links = gen.integers(
                 low=0, high=num_nodes, size=(num_edges, 2), dtype=np.int32
             )
-
             return gym.spaces.GraphInstance(
                 nodes=get_dummy_batch_for_space(
                     space.node_space,
@@ -220,7 +219,7 @@ def get_dummy_batch_for_space(
                     fill_value=fill_value,
                     time_size=time_size,
                     time_major=time_major,
-                    one_hot_discrete=one_hot_discrete
+                    one_hot_discrete=one_hot_discrete,
                 ).reshape(num_nodes, -1),
                 edges=get_dummy_batch_for_space(
                     space.edge_space,
@@ -228,11 +227,10 @@ def get_dummy_batch_for_space(
                     fill_value=fill_value,
                     time_size=time_size,
                     time_major=time_major,
-                    one_hot_discrete=one_hot_discrete
+                    one_hot_discrete=one_hot_discrete,
                 ).reshape(num_edges, -1),
                 edge_links=edge_links,
             )
-
         return tuple([generate_graph_dummy() for _ in range(batch_size)])
 
     # Primitive spaces: Box, Discrete, MultiDiscrete.
@@ -361,8 +359,6 @@ def batch(
             flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
 
     def batch_func(*s):
-        # PATCH: Handle GraphInstances and lists of GraphInstances specially
-        # GraphInstances should be batched as tuples, not stacked
         if isinstance(s[0], gym.spaces.GraphInstance):
             return tuple([item for item in s])
         elif isinstance(s[0], tuple) and len(s[0]) > 0 and isinstance(s[0][0], gym.spaces.GraphInstance):
@@ -417,12 +413,16 @@ def unbatch(batches_struct):
         The list of individual structs. Each item in the returned list represents a
         single (maybe complex) batch item.
     """
-    flat_batches = tree.flatten(batches_struct)
+    flat_batches = graph_space_utils.flatten(batches_struct)
+
+    # If there are no leaves or all leaves are None, return an empty list.
+    if not flat_batches or flat_batches[0] is None:
+        return []
 
     out = []
     for batch_pos in range(len(flat_batches[0])):
         out.append(
-            tree.unflatten_as(
+            graph_space_utils.unflatten_as(
                 batches_struct,
                 [flat_batches[i][batch_pos] for i in range(len(flat_batches))],
             )

@@ -596,7 +596,8 @@ class Algorithm(Checkpointable, Trainable):
             boundaries=DEFAULT_HISTOGRAM_BOUNDARIES_LONG_EVENTS,
             tag_keys=("rllib",),
         )
-        self._metrics_step_time.set_default_tags({"rllib": self.__class__.__name__})
+        self._metrics_step_time.set_default_tags(
+            {"rllib": self.__class__.__name__})
 
         self._metrics_run_one_training_iteration_time = Histogram(
             name="rllib_algorithm_run_one_training_iteration_time",
@@ -644,7 +645,8 @@ class Algorithm(Checkpointable, Trainable):
             boundaries=DEFAULT_HISTOGRAM_BOUNDARIES_LONG_EVENTS,
             tag_keys=("rllib",),
         )
-        self._metrics_evaluate_time.set_default_tags({"rllib": self.__class__.__name__})
+        self._metrics_evaluate_time.set_default_tags(
+            {"rllib": self.__class__.__name__})
 
         self._metrics_evaluate_sync_env_runner_weights_time = Histogram(
             name="rllib_algorithm_evaluate_sync_env_runner_weights_time",
@@ -1253,9 +1255,6 @@ class Algorithm(Checkpointable, Trainable):
                 and (self.iteration + 1) % self.config.offline_evaluation_interval == 0
             )
 
-        if self.config.evaluation_interval and (self.iteration == 0 and self.config.evaluation_interval > 0 and self.config.evaluation_on_start):
-            evaluate_this_iter = True
-
             # Results dict for training (and if appolicable: evaluation).
             eval_results: ResultDict = {}
 
@@ -1284,7 +1283,8 @@ class Algorithm(Checkpointable, Trainable):
 
             # Sequential: Train (already done above), then evaluate.
             if evaluate_this_iter and not self.config.evaluation_parallel_to_training:
-                eval_results = self._run_one_evaluation(parallel_train_future=None)
+                eval_results = self._run_one_evaluation(
+                    parallel_train_future=None)
 
             if evaluate_offline_this_iter:
                 offline_eval_results = self._run_one_offline_evaluation()
@@ -1673,7 +1673,8 @@ class Algorithm(Checkpointable, Trainable):
             * self.config.dataset_num_iters_per_eval_runner
         )
 
-        logger.info(f"Evaluating current state of {self} for {duration} {unit}.")
+        logger.info(
+            f"Evaluating current state of {self} for {duration} {unit}.")
 
         results = self.offline_eval_runner_group.local_runner.run()
 
@@ -1829,7 +1830,8 @@ class Algorithm(Checkpointable, Trainable):
                 results = (
                     self.eval_env_runner_group.foreach_env_runner_async_fetch_ready(
                         func=_env_runner_remote,
-                        kwargs={"num": _num, "round": _round, "iter": algo_iteration},
+                        kwargs={"num": _num, "round": _round,
+                                "iter": algo_iteration},
                         tag="_env_runner_remote",
                     )
                 )
@@ -1848,7 +1850,8 @@ class Algorithm(Checkpointable, Trainable):
             else:
                 results = (
                     self.eval_env_runner_group.foreach_env_runner_async_fetch_ready(
-                        func=lambda w: (w.sample(), w.get_metrics(), algo_iteration),
+                        func=lambda w: (
+                            w.sample(), w.get_metrics(), algo_iteration),
                         tag="env_runner_sample_and_get_metrics",
                     )
                 )
@@ -2112,7 +2115,8 @@ class Algorithm(Checkpointable, Trainable):
 
                 results = (
                     self.eval_env_runner_group.foreach_env_runner_async_fetch_ready(
-                        func=lambda w: (w.sample(), w.get_metrics(), algo_iteration),
+                        func=lambda w: (
+                            w.sample(), w.get_metrics(), algo_iteration),
                         remote_worker_ids=selected_eval_worker_ids,
                         tag="env_runner_sample_and_get_metrics",
                     )
@@ -2255,7 +2259,8 @@ class Algorithm(Checkpointable, Trainable):
         else:
             multi_rl_module_spec = (
                 self.learner_group.foreach_learner(
-                    lambda learner: MultiRLModuleSpec.from_module(learner.module)
+                    lambda learner: MultiRLModuleSpec.from_module(
+                        learner.module)
                 )
                 .result_or_errors[0]
                 .get()
@@ -2286,11 +2291,13 @@ class Algorithm(Checkpointable, Trainable):
             ):
                 for module_id, module in er.module._rl_modules.copy().items():
                     if module_id not in multi_rl_module_spec.rl_module_specs:
-                        er.module.remove_module(module_id, raise_err_if_not_found=True)
+                        er.module.remove_module(
+                            module_id, raise_err_if_not_found=True)
                 # Add modules, if necessary.
                 for mid, mod_spec in multi_rl_module_spec.rl_module_specs.items():
                     if mid not in er.module:
-                        er.module.add_module(mid, mod_spec.build(), override=False)
+                        er.module.add_module(
+                            mid, mod_spec.build(), override=False)
             # Now that the MultiRLModule is fixed, update the state.
             er.set_state(ray.get(state_ref))
 
@@ -2349,7 +2356,8 @@ class Algorithm(Checkpointable, Trainable):
                 remote_worker_ids=restored,
                 local_runner=False,
                 timeout_seconds=self.evaluation_config.offline_eval_runner_restore_timeout_s,
-                kwargs={"iterator": runner_group._offline_data_iterators[restored]},
+                kwargs={
+                    "iterator": runner_group._offline_data_iterators[restored]},
             )
 
         return restored
@@ -3164,7 +3172,8 @@ class Algorithm(Checkpointable, Trainable):
                             COMPONENT_RL_MODULE, components
                         ),
                         not_components=force_list(
-                            self._get_subcomponents(COMPONENT_RL_MODULE, not_components)
+                            self._get_subcomponents(
+                                COMPONENT_RL_MODULE, not_components)
                         )
                         # We don't want the RLModule state from the EnvRunners (it's
                         # `inference_only` anyway and already provided in full by the
@@ -3292,11 +3301,13 @@ class Algorithm(Checkpointable, Trainable):
         elif self.config.is_online and not self.env_runner:
             if self.env_to_module_connector:
                 components.append(
-                    (COMPONENT_ENV_TO_MODULE_CONNECTOR, self.env_to_module_connector),
+                    (COMPONENT_ENV_TO_MODULE_CONNECTOR,
+                     self.env_to_module_connector),
                 )
             if self.module_to_env_connector:
                 components.append(
-                    (COMPONENT_MODULE_TO_ENV_CONNECTOR, self.module_to_env_connector),
+                    (COMPONENT_MODULE_TO_ENV_CONNECTOR,
+                     self.module_to_env_connector),
                 )
         if self.eval_env_runner:
             components.append(
@@ -3450,7 +3461,8 @@ class Algorithm(Checkpointable, Trainable):
             eval_env_runner_bundles = []
 
         if cls._should_create_offline_evaluation_runners(eval_config):
-            offline_eval_runner_bundles = _get_offline_eval_runner_bundles(eval_config)
+            offline_eval_runner_bundles = _get_offline_eval_runner_bundles(
+                eval_config)
         else:
             offline_eval_runner_bundles = []
 
@@ -3727,7 +3739,8 @@ class Algorithm(Checkpointable, Trainable):
                     while not train_iter_ctx.should_stop(has_run_once):
                         # Before training step, try to bring failed workers back.
                         with self.metrics.log_time((TIMERS, RESTORE_ENV_RUNNERS_TIMER)):
-                            restored = self.restore_env_runners(self.env_runner_group)
+                            restored = self.restore_env_runners(
+                                self.env_runner_group)
                             # Fire the callback for re-created EnvRunners.
                             if restored:
                                 self._make_on_env_runners_recreated_callbacks(
@@ -3858,10 +3871,12 @@ class Algorithm(Checkpointable, Trainable):
                     with self.metrics.log_time(
                         (TIMERS, RESTORE_EVAL_ENV_RUNNERS_TIMER)
                     ):
-                        restored = self.restore_env_runners(self.eval_env_runner_group)
+                        restored = self.restore_env_runners(
+                            self.eval_env_runner_group)
                 else:
                     with self._timers["restore_eval_workers"]:
-                        restored = self.restore_env_runners(self.eval_env_runner_group)
+                        restored = self.restore_env_runners(
+                            self.eval_env_runner_group)
                 # Fire the callback for re-created EnvRunners.
                 if restored:
                     self._make_on_env_runners_recreated_callbacks(
@@ -4436,7 +4451,8 @@ class Algorithm(Checkpointable, Trainable):
             with TrainIterCtx(algo=self) as train_iter_ctx:
                 while not train_iter_ctx.should_stop(training_step_results):
                     with self._timers["restore_workers"]:
-                        restored = self.restore_env_runners(self.env_runner_group)
+                        restored = self.restore_env_runners(
+                            self.env_runner_group)
                         # Fire the callback for re-created EnvRunners.
                         if restored:
                             self._make_on_env_runners_recreated_callbacks(

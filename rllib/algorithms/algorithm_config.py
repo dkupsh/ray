@@ -515,7 +515,6 @@ class AlgorithmConfig(_Config):
 
         # `self.evaluation()`
         self.evaluation_interval = None
-        self.evaluation_on_start = False
         self.evaluation_duration = 10
         self.evaluation_duration_unit = "episodes"
         self.evaluation_sample_timeout_s = 120.0
@@ -702,10 +701,8 @@ class AlgorithmConfig(_Config):
 
         # Switch out deprecated vs new config keys.
         config["callbacks"] = config.pop("callbacks_class", None)
-        config["create_env_on_driver"] = config.pop(
-            "create_env_on_local_worker", 1)
-        config["custom_eval_function"] = config.pop(
-            "custom_evaluation_function", None)
+        config["create_env_on_driver"] = config.pop("create_env_on_local_worker", 1)
+        config["custom_eval_function"] = config.pop("custom_evaluation_function", None)
         config["framework"] = config.pop("framework_str", None)
 
         # Simplify: Remove all deprecated keys that have as value `DEPRECATED_VALUE`.
@@ -823,8 +820,7 @@ class AlgorithmConfig(_Config):
             elif key == "model":
                 # Resolve possible classpath.
                 if isinstance(value, dict) and value.get("custom_model"):
-                    value["custom_model"] = deserialize_type(
-                        value["custom_model"])
+                    value["custom_model"] = deserialize_type(value["custom_model"])
                 self.training(**{key: value})
             elif key == "optimizer":
                 self.training(**{key: value})
@@ -1120,8 +1116,7 @@ class AlgorithmConfig(_Config):
                     )
                 )
             # Batch all data.
-            pipeline.append(BatchIndividualItems(
-                multi_agent=self.is_multi_agent))
+            pipeline.append(BatchIndividualItems(multi_agent=self.is_multi_agent))
             # Convert to Tensors.
             pipeline.append(NumpyToTensor(device=device))
 
@@ -1298,11 +1293,9 @@ class AlgorithmConfig(_Config):
             # Append all other columns handling.
             pipeline.append(AddColumnsFromEpisodesToTrainBatch())
             # Append time-rank handler.
-            pipeline.append(AddTimeDimToBatchAndZeroPad(
-                as_learner_connector=True))
+            pipeline.append(AddTimeDimToBatchAndZeroPad(as_learner_connector=True))
             # Append STATE_IN/STATE_OUT handler.
-            pipeline.append(AddStatesFromEpisodesToBatch(
-                as_learner_connector=True))
+            pipeline.append(AddStatesFromEpisodesToBatch(as_learner_connector=True))
             # If multi-agent -> Map from AgentID-based data to ModuleID based data.
             if self.is_multi_agent:
                 pipeline.append(
@@ -1316,12 +1309,9 @@ class AlgorithmConfig(_Config):
                     )
                 )
             # Batch all data.
-            pipeline.append(BatchIndividualItems(
-                multi_agent=self.is_multi_agent))
+            pipeline.append(BatchIndividualItems(multi_agent=self.is_multi_agent))
             # Convert to Tensors.
-            pipeline.append(NumpyToTensor(
-                as_learner_connector=True, device=device))
-
+            pipeline.append(NumpyToTensor(as_learner_connector=True, device=device))
         return pipeline
 
     def build_learner_group(
@@ -1359,8 +1349,7 @@ class AlgorithmConfig(_Config):
         # If `spaces` or `env` provided -> Create a MultiRLModuleSpec first to be
         # passed into the LearnerGroup constructor.
         if rl_module_spec is None:
-            rl_module_spec = self.get_multi_rl_module_spec(
-                env=env, spaces=spaces)
+            rl_module_spec = self.get_multi_rl_module_spec(env=env, spaces=spaces)
 
         # Construct the actual LearnerGroup.
         learner_group = LearnerGroup(
@@ -1401,8 +1390,7 @@ class AlgorithmConfig(_Config):
         # passed into the LearnerGroup constructor.
         rl_module_spec = None
         if env is not None or spaces is not None:
-            rl_module_spec = self.get_multi_rl_module_spec(
-                env=env, spaces=spaces)
+            rl_module_spec = self.get_multi_rl_module_spec(env=env, spaces=spaces)
         # Construct the actual Learner object.
         learner = self.learner_class(config=self, module_spec=rl_module_spec)
         # `build()` the Learner (internal structures such as RLModule, etc..).
@@ -1874,8 +1862,7 @@ class AlgorithmConfig(_Config):
             Callable[[EnvType], Union["ConnectorV2", List["ConnectorV2"]]]
         ] = NotProvided,
         module_to_env_connector: Optional[
-            Callable[[EnvType, "RLModule"],
-                     Union["ConnectorV2", List["ConnectorV2"]]]
+            Callable[[EnvType, "RLModule"], Union["ConnectorV2", List["ConnectorV2"]]]
         ] = NotProvided,
         add_default_connectors_to_env_to_module_pipeline: Optional[bool] = NotProvided,
         add_default_connectors_to_module_to_env_pipeline: Optional[bool] = NotProvided,
@@ -1893,13 +1880,11 @@ class AlgorithmConfig(_Config):
         exploration_config: Optional[dict] = NotProvided,  # @OldAPIStack
         sample_collector: Optional[Type[SampleCollector]] = NotProvided,  # @OldAPIStack
         remote_worker_envs: Optional[bool] = NotProvided,  # @OldAPIStack
-        # @OldAPIStack
-        remote_env_batch_wait_ms: Optional[float] = NotProvided,
+        remote_env_batch_wait_ms: Optional[float] = NotProvided,  # @OldAPIStack
         preprocessor_pref: Optional[str] = NotProvided,  # @OldAPIStack
         observation_filter: Optional[str] = NotProvided,  # @OldAPIStack
         enable_tf1_exec_eagerly: Optional[bool] = NotProvided,  # @OldAPIStack
-        # @OldAPIStack
-        sampler_perf_stats_ema_coef: Optional[float] = NotProvided,
+        sampler_perf_stats_ema_coef: Optional[float] = NotProvided,  # @OldAPIStack
         # Deprecated args.
         num_rollout_workers=DEPRECATED_VALUE,
         num_envs_per_worker=DEPRECATED_VALUE,
@@ -2179,8 +2164,7 @@ class AlgorithmConfig(_Config):
                 )
                 or rollout_fragment_length == "auto"
             ):
-                raise ValueError(
-                    "`rollout_fragment_length` must be int >0 or 'auto'!")
+                raise ValueError("`rollout_fragment_length` must be int >0 or 'auto'!")
             self.rollout_fragment_length = rollout_fragment_length
         if batch_mode is not NotProvided:
             if batch_mode not in ["truncate_episodes", "complete_episodes"]:
@@ -2426,8 +2410,7 @@ class AlgorithmConfig(_Config):
         ] = NotProvided,
         add_default_connectors_to_learner_pipeline: Optional[bool] = NotProvided,
         learner_config_dict: Optional[Dict[str, Any]] = NotProvided,
-        **kwargs
-    ) -> "AlgorithmConfig":
+    ) -> Self:
         """Sets the training related configuration.
 
         Args:
@@ -2762,7 +2745,6 @@ class AlgorithmConfig(_Config):
         self,
         *,
         evaluation_interval: Optional[int] = NotProvided,
-        evaluation_on_start: Optional[bool] = NotProvided,
         evaluation_duration: Optional[Union[int, str]] = NotProvided,
         evaluation_duration_unit: Optional[str] = NotProvided,
         evaluation_auto_duration_min_env_steps_per_sample: Optional[int] = NotProvided,
@@ -3009,8 +2991,6 @@ class AlgorithmConfig(_Config):
 
         if evaluation_interval is not NotProvided:
             self.evaluation_interval = evaluation_interval
-        if evaluation_on_start is not NotProvided:
-            self.evaluation_on_start = evaluation_on_start
         if evaluation_duration is not NotProvided:
             self.evaluation_duration = evaluation_duration
         if evaluation_duration_unit is not NotProvided:
@@ -3125,8 +3105,7 @@ class AlgorithmConfig(_Config):
     def offline_data(
         self,
         *,
-        input_: Optional[Union[str, Callable[[
-            IOContext], InputReader]]] = NotProvided,
+        input_: Optional[Union[str, Callable[[IOContext], InputReader]]] = NotProvided,
         offline_data_class: Optional[Type] = NotProvided,
         input_read_method: Optional[Union[str, Callable]] = NotProvided,
         input_read_method_kwargs: Optional[Dict] = NotProvided,
@@ -3519,8 +3498,7 @@ class AlgorithmConfig(_Config):
             Callable[[AgentID, "EpisodeType"], PolicyID]
         ] = NotProvided,
         policies_to_train: Optional[
-            Union[Collection[PolicyID], Callable[[
-                PolicyID, SampleBatchType], bool]]
+            Union[Collection[PolicyID], Callable[[PolicyID, SampleBatchType], bool]]
         ] = NotProvided,
         policy_states_are_swappable: Optional[bool] = NotProvided,
         observation_fn: Optional[Callable] = NotProvided,
@@ -3995,8 +3973,7 @@ class AlgorithmConfig(_Config):
     def rl_module(
         self,
         *,
-        model_config: Optional[Union[Dict[str, Any],
-                                     DefaultModelConfig]] = NotProvided,
+        model_config: Optional[Union[Dict[str, Any], DefaultModelConfig]] = NotProvided,
         rl_module_spec: Optional[RLModuleSpecType] = NotProvided,
         algorithm_config_overrides_per_module: Optional[
             Dict[ModuleID, PartialAlgorithmConfigDict]
@@ -4984,8 +4961,7 @@ class AlgorithmConfig(_Config):
             and version.parse(_torch.__version__) < TORCH_COMPILE_REQUIRED_VERSION
             and (self.torch_compile_learner or self.torch_compile_worker)
         ):
-            self._value_error(
-                "torch.compile is only supported from torch 2.0.0")
+            self._value_error("torch.compile is only supported from torch 2.0.0")
 
         # Make sure the Learner's torch-what-to-compile setting is supported.
         if self.torch_compile_learner:
@@ -5304,14 +5280,12 @@ class AlgorithmConfig(_Config):
 
                 default_policy_cls = None
                 if self.algo_class:
-                    default_policy_cls = self.algo_class.get_default_policy_class(
-                        self)
+                    default_policy_cls = self.algo_class.get_default_policy_class(self)
 
                 policies = self.policies
                 policy_specs = (
                     [
-                        PolicySpec(*spec) if isinstance(spec,
-                                                        (tuple, list)) else spec
+                        PolicySpec(*spec) if isinstance(spec, (tuple, list)) else spec
                         for spec in policies.values()
                     ]
                     if isinstance(policies, dict)
@@ -5783,8 +5757,7 @@ class AlgorithmConfig(_Config):
 
             # Infer observation space.
             if policy_spec.observation_space is None:
-                env_unwrapped = env.unwrapped if hasattr(
-                    env, "unwrapped") else env
+                env_unwrapped = env.unwrapped if hasattr(env, "unwrapped") else env
                 # Module's space is provided -> Use it as-is.
                 if spaces is not None and pid in spaces:
                     obs_space = spaces[pid][0]
@@ -5801,12 +5774,10 @@ class AlgorithmConfig(_Config):
                     if len(aids) == 0:
                         one_obs_space = env_unwrapped.observation_space
                     else:
-                        one_obs_space = env_unwrapped.get_observation_space(
-                            aids[0])
+                        one_obs_space = env_unwrapped.get_observation_space(aids[0])
                     # If all obs spaces are the same, just use the first space.
                     if all(
-                        env_unwrapped.get_observation_space(
-                            aid) == one_obs_space
+                        env_unwrapped.get_observation_space(aid) == one_obs_space
                         for aid in aids
                     ):
                         obs_space = one_obs_space
@@ -5830,8 +5801,7 @@ class AlgorithmConfig(_Config):
                                         "_fn`), however, these agents also have "
                                         "different observation spaces!"
                                     )
-                                obs_space = env_unwrapped.get_observation_space(
-                                    aid)
+                                obs_space = env_unwrapped.get_observation_space(aid)
                 # Just use env's obs space as-is.
                 elif env_obs_space is not None:
                     obs_space = env_obs_space
@@ -5850,8 +5820,7 @@ class AlgorithmConfig(_Config):
 
             # Infer action space.
             if policy_spec.action_space is None:
-                env_unwrapped = env.unwrapped if hasattr(
-                    env, "unwrapped") else env
+                env_unwrapped = env.unwrapped if hasattr(env, "unwrapped") else env
                 # Module's space is provided -> Use it as-is.
                 if spaces is not None and pid in spaces:
                     act_space = spaces[pid][1]
