@@ -2,7 +2,6 @@ from typing import Any, Dict, List, Optional, Union
 
 import gymnasium as gym
 import numpy as np
-import tree  # pip install dm_tree
 from gymnasium.utils.env_checker import data_equivalence
 
 from ray.rllib.utils.numpy import LARGE_INTEGER, one_hot, one_hot_multidiscrete
@@ -67,6 +66,24 @@ class InfiniteLookbackBuffer:
     def space_struct(self):
         return self._space_struct
 
+    def insert(self, item, index: int) -> None:
+        """Inserts the given item at the given index into this buffer.
+        Args:
+            item: The item to insert.
+            index: The index at which to insert the item.
+        """
+        if self.finalized:
+            def _insert(d, i):
+                if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                    return d[:index] + i + d[index:]
+                return np.insert(d, index, i, axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _insert, self.data, item
+            )
+        else:
+            self.data.insert(index, item)
+
     def get_state(self) -> Dict[str, Any]:
         """Returns the pickable state of a buffer.
 
@@ -98,34 +115,12 @@ class InfiniteLookbackBuffer:
         buffer = InfiniteLookbackBuffer()
         buffer.lookback = state["lookback"]
         buffer.finalized = state["finalized"]
-        buffer.space = gym_space_from_dict(state["space"]) if state["space"] else None
+        buffer.space = gym_space_from_dict(
+            state["space"]) if state["space"] else None
         # space_struct is set when space is assigned
-        from ray.rllib.utils.spaces.graph_space_utils import convert_list_to_graph_structure
-        buffer.data = convert_list_to_graph_structure(
-            from_jsonable_if_needed(state["data"], buffer.space)
-            if buffer.space
-            else state["data"]
-        )
+        buffer.data = state["data"]
+
         return buffer
-
-    def insert(self, item, index: int) -> None:
-        """Inserts the given item at the given index into this buffer.
-
-        Args:
-            item: The item to insert.
-            index: The index at which to insert the item.
-        """
-        if self.finalized:
-            def _insert(d, i):
-                if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
-                    return d[:index] + i + d[index:]
-                return np.insert(d, index, i, axis=0)
-
-            self.data = graph_space_utils.map_structure(
-                _insert, self.data, item
-            )
-        else:
-            self.data.insert(index, item)
 
     def append(self, item) -> None:
         """Appends the given item to the end of this buffer."""
@@ -135,8 +130,13 @@ class InfiniteLookbackBuffer:
                     [self.data, np.asarray(item)[np.newaxis]], axis=0
                 )
             else:
-                self.data = tree.map_structure(
-                    lambda d, i: np.concatenate([d, [i]], axis=0), self.data, item
+                def _append(d, i):
+                    if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                        return tuple([*d, *i])
+                    return np.concatenate([d, [i]], axis=0)
+
+                self.data = graph_space_utils.map_structure(
+                    _append, self.data, item
                 )
         else:
             self.data.append(item)
@@ -145,10 +145,15 @@ class InfiniteLookbackBuffer:
         """Appends all items in `items` to the end of this buffer."""
         if self.finalized:
             # TODO (sven): When extending with a list of structs, we should
-            #  probably rather do: `tree.map_structure(..., self.data,
-            #  tree.map_structure(lambda *s: np.array(*s), *items)`)??
-            self.data = tree.map_structure(
-                lambda d, i: np.concatenate([d, i], axis=0),
+            #  probably rather do: `graph_space_utils.map_structure(..., self.data,
+            #  graph_space_utils.map_structure(lambda *s: np.array(*s), *items)`)??
+            def _extend(d, i):
+                if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                    return tuple([*d, *i])
+                return np.concatenate([d, i], axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _extend,
                 self.data,
                 # Note, we could have dictionaries here.
                 np.array(items) if isinstance(items, list) else items,
@@ -173,8 +178,13 @@ class InfiniteLookbackBuffer:
                 method).
         """
         if self.finalized:
-            self.data = tree.map_structure(
-                lambda s: np.delete(s, index, axis=0), self.data
+            def _pop(d):
+                if isinstance(d, tuple) and len(d) > 0 and isinstance(d[0], gym.spaces.GraphInstance):
+                    return tuple([s for i, s in enumerate(d) if i != index])
+                return np.delete(d, index, axis=0)
+
+            self.data = graph_space_utils.map_structure(
+                _pop, self.data
             )
         else:
             self.data.pop(index)
@@ -393,7 +403,7 @@ class InfiniteLookbackBuffer:
         if self.finalized:
             if isinstance(self.data, np.ndarray):
                 return len(self.data)
-            return len(tree.flatten(self.data)[0])
+            return len(graph_space_utils.flatten(self.data)[0])
         else:
             return len(self.data)
 
@@ -463,7 +473,7 @@ class InfiniteLookbackBuffer:
                 data_to_use = self.data[:-1]
         if _add_last_ts_value is not None:
             if self.finalized:
-                data_to_use = tree.map_structure(
+                data_to_use = graph_space_utils.map_structure(
                     lambda s, t: np.append(s, t),
                     data_to_use.copy(),
                     _add_last_ts_value,
@@ -511,8 +521,13 @@ class InfiniteLookbackBuffer:
                             one_hot_discrete=one_hot_discrete,
                         )
                     if data_slice is not None:
-                        data_slice = tree.map_structure(
-                            lambda s0, s: np.concatenate([s0, s]),
+                        def _extend(d, i):
+                            if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                                return tuple([*d, *i])
+                            return np.concatenate([d, i], axis=0)
+
+                        data_slice = graph_space_utils.map_structure(
+                            _extend,
                             fill_batch,
                             data_slice,
                         )
@@ -529,10 +544,15 @@ class InfiniteLookbackBuffer:
                             one_hot_discrete=one_hot_discrete,
                         )
                     if data_slice is not None:
-                        data_slice = tree.map_structure(
-                            lambda s0, s: np.concatenate([s, s0]),
-                            fill_batch,
+                        def _extend(d, i):
+                            if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                                return tuple([*i, *d])
+                            return np.concatenate([i, d], axis=0)
+
+                        data_slice = graph_space_utils.map_structure(
+                            _extend,
                             data_slice,
+                            fill_batch,
                         )
                     else:
                         data_slice = fill_batch
@@ -557,7 +577,7 @@ class InfiniteLookbackBuffer:
 
         if data_slice is None:
             if self.finalized:
-                return tree.map_structure(lambda s: s[slice_], data_to_use)
+                return graph_space_utils.map_structure(lambda s: s[slice_], data_to_use)
             else:
                 return data_to_use[slice_]
         return data_slice
@@ -581,7 +601,7 @@ class InfiniteLookbackBuffer:
                     assert len(s[slice_]) == len(n)
                     s[slice_] = n
 
-                tree.map_structure(__set, self.data, new_data)
+                graph_space_utils.map_structure(__set, self.data, new_data)
             else:
                 assert len(self.data[slice_]) == len(new_data)
                 self.data[slice_] = new_data
@@ -629,8 +649,13 @@ class InfiniteLookbackBuffer:
                 data_to_use = self.data[:-1]
         if _add_last_ts_value is not None:
             if self.finalized:
-                data_to_use = tree.map_structure(
-                    lambda s, last: np.append(s, last), data_to_use, _add_last_ts_value
+                def _extend(d, i):
+                    if isinstance(i, tuple) and len(i) > 0 and isinstance(i[0], gym.spaces.GraphInstance):
+                        return tuple([*d, i])
+                    return np.append(d, i)
+
+                data_to_use = graph_space_utils.map_structure(
+                    _extend, data_to_use, _add_last_ts_value
                 )
             else:
                 data_to_use = data_to_use.copy()
@@ -649,7 +674,7 @@ class InfiniteLookbackBuffer:
 
         try:
             if self.finalized:
-                data = tree.map_structure(lambda s: s[idx], data_to_use)
+                data = graph_space_utils.map_structure(lambda s: s[idx], data_to_use)
             else:
                 data = data_to_use[idx]
         # Out of range index -> If `fill`, use a fill dummy (B=0), if not, error out.
@@ -692,7 +717,7 @@ class InfiniteLookbackBuffer:
                         assert self.space.contains(n), n
                     s[actual_idx] = n
 
-                tree.map_structure(__set, self.data, new_data)
+                graph_space_utils.map_structure(__set, self.data, new_data)
             else:
                 self.data[actual_idx] = new_data
         except IndexError:
@@ -801,7 +826,7 @@ class InfiniteLookbackBuffer:
 
         if isinstance(data, list):
             data = [
-                tree.map_structure(_convert, dslice, space_struct) for dslice in data
+                graph_space_utils.map_structure(_convert, dslice, space_struct) for dslice in data
             ]
         else:
             data = graph_space_utils.map_structure(

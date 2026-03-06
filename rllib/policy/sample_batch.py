@@ -5,6 +5,7 @@ from functools import partial
 from numbers import Number
 from typing import Dict, Iterator, List, Optional, Set, Union
 
+import gymnasium as gym
 import numpy as np
 import tree  # pip install dm_tree
 
@@ -138,8 +139,7 @@ class SampleBatch(dict):
     # Reward received before SampleBatch.REWARDS.
     PREV_REWARDS = "prev_rewards"
     ENV_ID = "env_id"  # An env ID (e.g. the index for a vectorized sub-env).
-    # Uniquely identifies an agent within an episode.
-    AGENT_INDEX = "agent_index"
+    AGENT_INDEX = "agent_index"  # Uniquely identifies an agent within an episode.
     # Uniquely identifies a sample batch. This is important to distinguish RNN
     # sequences from the same episode when multiple sample batches are
     # concatenated (fusing sequences across batches can be unsafe).
@@ -202,8 +202,7 @@ class SampleBatch(dict):
         # batches to a new one that's 100ts long. This new 100ts batch will have its
         # `num_gradient_updates` property set to 2.5 as it's the weighted average
         # (both original batches contribute 50%).
-        self.num_grad_updates: Optional[float] = kwargs.pop(
-            "_num_grad_updates", None)
+        self.num_grad_updates: Optional[float] = kwargs.pop("_num_grad_updates", None)
 
         # Call super constructor. This will make the actual data accessible
         # by column name (str) via e.g. self["some-col"].
@@ -235,8 +234,7 @@ class SampleBatch(dict):
             self.pop(SampleBatch.SEQ_LENS, None)
         # Numpyfy seq_lens if list.
         elif isinstance(seq_lens_, list):
-            self[SampleBatch.SEQ_LENS] = seq_lens_ = np.array(
-                seq_lens_, dtype=np.int32)
+            self[SampleBatch.SEQ_LENS] = seq_lens_ = np.array(seq_lens_, dtype=np.int32)
         elif (torch and torch.is_tensor(seq_lens_)) or (tf and tf.is_tensor(seq_lens_)):
             self[SampleBatch.SEQ_LENS] = seq_lens_
 
@@ -485,12 +483,18 @@ class SampleBatch(dict):
             permutation = np.random.permutation(self.count)
         # - Shuffle along batch axis (leave axis=1/time-axis as-is).
         else:
-            permutation = np.random.permutation(
-                len(self[SampleBatch.SEQ_LENS]))
+            permutation = np.random.permutation(len(self[SampleBatch.SEQ_LENS]))
 
         self_as_dict = dict(self)
         infos = self_as_dict.pop(Columns.INFOS, None)
-        shuffled = tree.map_structure(lambda v: v[permutation], self_as_dict)
+
+        def _permutation(v):
+            # Check if this is a tuple of GraphInstance objects
+            if isinstance(v, tuple) and len(v) > 0 and isinstance(v[0], gym.spaces.GraphInstance):
+                return tuple(v[i] for i in permutation)
+            return v[permutation]
+
+        shuffled = graph_space_utils.map_structure(_permutation, self_as_dict)
         if infos is not None:
             self_as_dict[Columns.INFOS] = [infos[i] for i in permutation]
 
@@ -607,8 +611,7 @@ class SampleBatch(dict):
                     slices = key_to_method[key]()
                     break
             if slices is None:
-                raise KeyError(
-                    f"{self} does not have keys {key_resolve_order}!")
+                raise KeyError(f"{self} does not have keys {key_resolve_order}!")
 
         assert (
             sum(s.count for s in slices) == self.count
@@ -636,8 +639,7 @@ class SampleBatch(dict):
                 data = {
                     k: np.concatenate(
                         [
-                            np.zeros(shape=(-start,) +
-                                     v.shape[1:], dtype=v.dtype),
+                            np.zeros(shape=(-start,) + v.shape[1:], dtype=v.dtype),
                             v[0:end],
                         ]
                     )
@@ -658,8 +660,7 @@ class SampleBatch(dict):
                     data[state_key] = self[state_key][state_start:state_end]
                     state_idx += 1
                     state_key = "state_in_{}".format(state_idx)
-                seq_lens = list(self[SampleBatch.SEQ_LENS]
-                                [state_start:state_end])
+                seq_lens = list(self[SampleBatch.SEQ_LENS][state_start:state_end])
                 # Adjust seq_lens if necessary.
                 data_len = len(data[next(iter(data))])
                 if sum(seq_lens) != data_len:
@@ -703,12 +704,8 @@ class SampleBatch(dict):
             )
         else:
             return SampleBatch(
-<<<<<<< HEAD
-                tree.map_structure(lambda value: value[start:end], self),
-=======
                 graph_space_utils.map_structure(
                     lambda value: value[start:end], self),
->>>>>>> 43e3ebb4ca (updates to make offline learning work and sample batch)
                 _is_training=self.is_training,
                 _time_major=self.time_major,
                 _num_grad_updates=self.num_grad_updates,
@@ -745,12 +742,8 @@ class SampleBatch(dict):
         # Furthermore, slicing does not work when the data in the column is
         # singular (not a list or array).
         infos = self.pop(SampleBatch.INFOS, None)
-<<<<<<< HEAD
-        data = tree.map_structure(lambda value: value[start:stop], self)
-=======
         data = graph_space_utils.map_structure(
             lambda value: value[start:stop], self)
->>>>>>> 43e3ebb4ca (updates to make offline learning work and sample batch)
         if infos is not None:
             # Slice infos according to SEQ_LENS.
             info_slice_start = int(sum(self[SampleBatch.SEQ_LENS][:start]))
@@ -884,17 +877,11 @@ class SampleBatch(dict):
                 f_pad = [None] * length
             else:
                 # Make sure type doesn't change.
-                f_pad = np.zeros((length,) + np.shape(value)
-                                 [1:], dtype=value.dtype)
+                f_pad = np.zeros((length,) + np.shape(value)[1:], dtype=value.dtype)
             # Fill primer with data.
             f_pad_base = f_base = 0
             for len_ in self[SampleBatch.SEQ_LENS]:
-<<<<<<< HEAD
                 f_pad[f_pad_base : f_pad_base + len_] = value[f_base : f_base + len_]
-=======
-                f_pad[f_pad_base: f_pad_base +
-                      len_] = value[f_base: f_base + len_]
->>>>>>> 43e3ebb4ca (updates to make offline learning work and sample batch)
                 f_pad_base += max_seq_len
                 f_base += len_
             assert f_base == len(value), value
@@ -907,12 +894,8 @@ class SampleBatch(dict):
                 curr = curr[p]
 
         self_as_dict = dict(self)
-<<<<<<< HEAD
-        tree.map_structure_with_path(_zero_pad_in_place, self_as_dict)
-=======
         graph_space_utils.map_structure_with_path(
             _zero_pad_in_place, self_as_dict)
->>>>>>> 43e3ebb4ca (updates to make offline learning work and sample batch)
 
         # Set flags to indicate, we are now zero-padded (and to what extend).
         self.zero_padded = True
@@ -927,8 +910,7 @@ class SampleBatch(dict):
         framework: str = "torch",
         pin_memory: bool = False,
         use_stream: bool = False,
-        stream: Optional[Union["torch.cuda.Stream",
-                               "torch.cuda.Stream"]] = None,
+        stream: Optional[Union["torch.cuda.Stream", "torch.cuda.Stream"]] = None,
     ):
         """TODO: transfer batch to given device as framework tensor."""
         if framework == "torch":
@@ -1237,12 +1219,8 @@ class SampleBatch(dict):
             )
         else:
             infos = self.pop(SampleBatch.INFOS, None)
-<<<<<<< HEAD
-            data = tree.map_structure(lambda s: s[start:stop], self)
-=======
             data = graph_space_utils.map_structure(
                 lambda s: s[start:stop], self)
->>>>>>> 43e3ebb4ca (updates to make offline learning work and sample batch)
             if infos is not None and isinstance(infos, (list, np.ndarray)):
                 self[SampleBatch.INFOS] = infos
                 data[SampleBatch.INFOS] = infos[start:stop]
@@ -1354,8 +1332,7 @@ class SampleBatch(dict):
                     # -1 b/c index=0 for observations means the current (last
                     # seen) observation (after having taken an action).
                     obs_shift = (
-                        -1 if data_col in [SampleBatch.OBS,
-                                           SampleBatch.NEXT_OBS] else 0
+                        -1 if data_col in [SampleBatch.OBS, SampleBatch.NEXT_OBS] else 0
                     )
                     from_ = view_req.shift_from + obs_shift
                     to_ = view_req.shift_to + obs_shift + 1
@@ -1405,8 +1382,7 @@ class MultiAgentBatch:
         """
 
         for v in policy_batches.values():
-            assert isinstance(v, SampleBatch), type(v)
-
+            assert isinstance(v, SampleBatch)
         self.policy_batches = policy_batches
         # Called "count" for uniformity with SampleBatch.
         # Prefer to access this via the `env_steps()` method when possible
@@ -1481,8 +1457,7 @@ class MultiAgentBatch:
             nonlocal cur_slice_size
             assert cur_slice_size > 0
             batch = MultiAgentBatch(
-                {k: v.build_and_reset()
-                 for k, v in cur_slice.items()}, cur_slice_size
+                {k: v.build_and_reset() for k, v in cur_slice.items()}, cur_slice_size
             )
             cur_slice_size = 0
             cur_slice.clear()
@@ -1549,8 +1524,7 @@ class MultiAgentBatch:
         framework="torch",
         pin_memory: bool = False,
         use_stream: bool = False,
-        stream: Optional[Union["torch.cuda.Stream",
-                               "torch.cuda.Stream"]] = None,
+        stream: Optional[Union["torch.cuda.Stream", "torch.cuda.Stream"]] = None,
     ):
         """TODO: transfer batch to given device as framework tensor."""
         if framework == "torch":
@@ -1738,14 +1712,9 @@ def concat_samples(samples: List[SampleBatchType]) -> SampleBatchType:
             )
         else:
             values_to_concat = [c[k] for c in concated_samples]
-<<<<<<< HEAD
-            _concat_values_w_time = partial(_concat_values, time_major=time_major)
-            concatd_data[k] = tree.map_structure(
-=======
             _concat_values_w_time = partial(
                 _concat_values, time_major=time_major)
             concatd_data[k] = graph_space_utils.map_structure(
->>>>>>> 43e3ebb4ca (updates to make offline learning work and sample batch)
                 _concat_values_w_time, *values_to_concat
             )
 
@@ -1818,8 +1787,7 @@ def concat_samples_into_ma_batch(samples: List[SampleBatchType]) -> "MultiAgentB
             # Otherwise: Error.
             raise ValueError(
                 "`concat_samples_into_ma_batch` can only concat "
-                "SampleBatch|MultiAgentBatch objects, not {}!".format(
-                    type(s).__name__)
+                "SampleBatch|MultiAgentBatch objects, not {}!".format(type(s).__name__)
             )
 
         for key, batch in s.policy_batches.items():

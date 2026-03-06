@@ -20,8 +20,6 @@ from ray.rllib.utils.framework import try_import_torch
 from ray.rllib.utils.torch_utils import explained_variance
 from ray.rllib.utils.typing import ModuleID, TensorType
 
-from dse import model
-
 torch, nn = try_import_torch()
 
 logger = logging.getLogger(__name__)
@@ -63,19 +61,18 @@ class PPOTorchLearner(PPOLearner, TorchLearner):
         action_dist_class_exploration = module.get_exploration_action_dist_cls()
 
         curr_action_dist = action_dist_class_train.from_logits(
-            fwd_out[Columns.ACTION_DIST_INPUTS], model=module
+            fwd_out[Columns.ACTION_DIST_INPUTS]
         )
         # TODO (sven): We should ideally do this in the LearnerConnector (separation of
         #  concerns: Only do things on the EnvRunners that are required for computing
         #  actions, do NOT do anything on the EnvRunners that's only required for a
         #   training update).
         prev_action_dist = action_dist_class_exploration.from_logits(
-            batch[Columns.ACTION_DIST_INPUTS], model=module
+            batch[Columns.ACTION_DIST_INPUTS]
         )
 
         logp_ratio = torch.exp(
-            curr_action_dist.logp(
-                batch[Columns.ACTIONS]) - batch[Columns.ACTION_LOGP]
+            curr_action_dist.logp(batch[Columns.ACTIONS]) - batch[Columns.ACTION_LOGP]
         )
 
         # Only calculate kl loss if necessary (kl-coeff > 0.0).
@@ -91,8 +88,7 @@ class PPOTorchLearner(PPOLearner, TorchLearner):
         surrogate_loss = torch.min(
             batch[Postprocessing.ADVANTAGES] * logp_ratio,
             batch[Postprocessing.ADVANTAGES]
-            * torch.clamp(logp_ratio, 1 - config.clip_param,
-                          1 + config.clip_param),
+            * torch.clamp(logp_ratio, 1 - config.clip_param, 1 + config.clip_param),
         )
 
         # Compute a value function loss.
@@ -100,8 +96,7 @@ class PPOTorchLearner(PPOLearner, TorchLearner):
             value_fn_out = module.compute_values(
                 batch, embeddings=fwd_out.get(Columns.EMBEDDINGS)
             )
-            vf_loss = torch.pow(
-                value_fn_out - batch[Postprocessing.VALUE_TARGETS], 2.0)
+            vf_loss = torch.pow(value_fn_out - batch[Postprocessing.VALUE_TARGETS], 2.0)
             vf_loss_clipped = torch.clamp(vf_loss, 0, config.vf_clip_param)
             mean_vf_loss = possibly_masked_mean(vf_loss_clipped)
             mean_vf_unclipped_loss = possibly_masked_mean(vf_loss)
@@ -114,8 +109,7 @@ class PPOTorchLearner(PPOLearner, TorchLearner):
             -surrogate_loss
             + config.vf_loss_coeff * vf_loss_clipped
             - (
-                self.entropy_coeff_schedulers_per_module[module_id].get_current_value(
-                )
+                self.entropy_coeff_schedulers_per_module[module_id].get_current_value()
                 * curr_entropy
             )
         )
@@ -138,8 +132,7 @@ class PPOTorchLearner(PPOLearner, TorchLearner):
                 LEARNER_RESULTS_KL_KEY: mean_kl_loss,
             },
             key=module_id,
-            # <- single items (should not be mean/ema-reduced over time).
-            window=1,
+            window=1,  # <- single items (should not be mean/ema-reduced over time).
         )
         # Return the total loss.
         return total_loss
