@@ -157,10 +157,6 @@ class TestMCTS(unittest.TestCase):
         self.assertEqual(int(root.child_number_visits[0]), 0)
 
 
-if __name__ == '__main__':
-    unittest.main()
-
-
 class TestBackup(unittest.TestCase):
 
     def test_every_edge_gets_its_rewards_and_the_discounted_value_beyond(self):
@@ -199,7 +195,7 @@ class TestRootEdge(unittest.TestCase):
         bad = Node(1, mask, True, -1.0, None, mcts, parent=root)
         good.backup(0.0)
         bad.backup(0.0)
-        self.assertEqual(mcts._q_min, -0.5)
+        self.assertEqual(mcts._q_min, -1.0)
         self.assertEqual(mcts._q_max, 0.0)
 
 
@@ -231,3 +227,123 @@ class TestSearchScaling(unittest.TestCase):
         self.assertEqual(mcts.temperature_at(0), 1.0)
         self.assertAlmostEqual(mcts.temperature_at(10), 0.1)
         self.assertAlmostEqual(mcts.temperature_at(99), 0.1)
+
+
+class _ChainEnv(gym.Env):
+    """Two forced moves: -100 for the first, a terminal 8 for the second."""
+
+    action_space = Discrete(2)
+    observation_space = _ToyEnv.observation_space
+    rewards = (-100.0, 8.0)
+
+    def __init__(self):
+        self._depth = 0
+        self._snapshots = {}
+
+    def _obs(self):
+        return {
+            'action_mask': np.array([1, 0], dtype=np.int8),
+            'depth': np.array([self._depth], dtype=np.int32),
+        }
+
+    def reset(self, *, seed=None, options=None):
+        self._depth = 0
+        return self._obs(), {}
+
+    def step(self, action):
+        reward = self.rewards[self._depth]
+        self._depth += 1
+        return self._obs(), reward, self._depth == len(self.rewards), False, {}
+
+    def get_state(self):
+        handle = len(self._snapshots)
+        self._snapshots[handle] = self._depth
+        return handle
+
+    def set_state(self, handle):
+        self._depth = self._snapshots[handle]
+        return self._obs()
+
+
+class TestSearchModesAgree(unittest.TestCase):
+    """Sequential and batched search back up the same path returns."""
+
+    VALUE = 2.0
+    GAMMA = 0.5
+
+    def _search(self, batch_size):
+        env = _ChainEnv()
+
+        def evaluate(_obs):
+            return np.array([1.0, 0.0], dtype=np.float32), self.VALUE
+
+        mcts = MCTS(evaluate, {
+            'num_simulations': 3, 'gamma': self.GAMMA, 'batch_size': batch_size,
+            'normalize_q': False,
+        }, batched_priors_and_value=lambda obs_list: [evaluate(o) for o in obs_list])
+        obs, _ = env.reset()
+        root = Node(0, obs, False, 0.0, env.get_state(), mcts,
+                    parent=RootParentNode(env))
+        if batch_size == 1:
+            mcts._run_sequential_simulations(root)
+        else:
+            mcts._run_batched_simulations(root)
+        return root
+
+    def test_path_rewards_reach_the_root(self):
+        # Expanding the middle node backs up -100 + gamma * V; reaching the
+        # terminal leaf backs up 8 once and -100 + gamma * 8 above it.
+        expected_root = (-100.0 + self.GAMMA * self.VALUE) + (-100.0 + self.GAMMA * 8.0)
+        for batch_size in (1, 2):
+            with self.subTest(batch_size=batch_size):
+                root = self._search(batch_size)
+                middle = root.children[0]
+                self.assertEqual(root.child_number_visits[0], 2)
+                self.assertAlmostEqual(root.child_total_value[0], expected_root)
+                self.assertAlmostEqual(middle.child_total_value[0], 8.0)
+                self.assertAlmostEqual(root.child_Q()[0], expected_root / 2)
+
+
+class TestChildQ(unittest.TestCase):
+
+    def test_q_is_the_mean_and_unvisited_edges_score_zero(self):
+        mcts = MCTS(None, {'num_simulations': 1, 'normalize_q': False})
+
+        class Env:
+            class action_space:
+                n = 2
+
+        root = Node(0, {'action_mask': np.array([True, True])}, False, 0.0,
+                    None, mcts, parent=RootParentNode(Env()))
+        root.child_total_value[:] = [-6.0, 0.0]
+        root.child_number_visits[:] = [3.0, 0.0]
+        np.testing.assert_array_equal(root.child_Q(), [-2.0, 0.0])
+
+
+class TestValueTarget(unittest.TestCase):
+
+    def test_target_is_the_return_after_the_state(self):
+        from ray.rllib.algorithms.alpha_zero.alpha_zero import (
+            VALUE_TARGET, _SelfPlayWorker)
+
+        class OneStep(_ToyEnv):
+            def step(self, action):
+                obs, _, done, truncated, info = super().step(action)
+                return obs, 10.0, done, truncated, info
+
+        worker = object.__new__(_SelfPlayWorker)
+        worker.env = OneStep()
+        worker.gamma = 0.99
+        worker.value_target_scale = 1.0
+        worker.module = None
+        worker._callbacks_objs = []
+        worker._callbacks_funcs = {}
+        worker.mcts = MCTS(_uniform_priors_zero_value,
+                           {'num_simulations': 4, 'gamma': worker.gamma})
+        trajectory = worker.run_episode()['trajectory']
+        self.assertEqual(len(trajectory), 1)
+        self.assertAlmostEqual(trajectory[0][VALUE_TARGET], 10.0)
+
+
+if __name__ == '__main__':
+    unittest.main()

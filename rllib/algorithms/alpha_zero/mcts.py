@@ -129,9 +129,13 @@ class Node:
     def child_Q(self) -> np.ndarray:
         # Mean action-value (Q) per child edge, including pending
         # virtual-loss contributions so concurrent selectors discount
-        # paths that already have an in-flight evaluation.
-        q = self._effective_total_value() / (1 + self._effective_visits())
-        return self.mcts.normalized_q(q)
+        # paths that already have an in-flight evaluation. An unvisited
+        # edge scores 0 after normalization, as in MuZero.
+        visits = self._effective_visits()
+        visited = visits > 0
+        mean = np.divide(self._effective_total_value(), visits,
+                         out=np.zeros_like(visits), where=visited)
+        return np.where(visited, self.mcts.normalized_q(mean), 0.0)
 
     def child_U(self) -> np.ndarray:
         # Exploration bonus: c_puct * prior * sqrt(N) / (1 + n_i),
@@ -207,7 +211,7 @@ class Node:
             # The root's own edge scores nothing, and its arrival reward (any
             # size, from a move already made) must not set the scale.
             if not isinstance(node.parent, RootParentNode):
-                self.mcts.observe_q(node.total_value / (1 + node.number_visits))
+                self.mcts.observe_q(node.total_value / node.number_visits)
             node = node.parent
 
     def apply_virtual_loss(self, loss: float) -> None:
