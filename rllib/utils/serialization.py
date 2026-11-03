@@ -107,6 +107,15 @@ def gym_space_to_dict(space: gym.spaces.Space) -> Dict:
             "dtype": sp.dtype.str,
         }
 
+    def _graph(sp: gym.spaces.Graph) -> Dict:
+        return {
+            "space": "graph",
+            "node_space": gym_space_to_dict(sp.node_space),
+            "edge_space": (
+                None if sp.edge_space is None else gym_space_to_dict(sp.edge_space)
+            ),
+        }
+
     def _discrete(sp: gym.spaces.Discrete) -> Dict:
         d = {
             "space": "discrete",
@@ -189,6 +198,8 @@ def gym_space_to_dict(space: gym.spaces.Space) -> Dict:
         return _multi_binary(space)
     elif isinstance(space, gym.spaces.MultiDiscrete):
         return _multi_discrete(space)
+    elif isinstance(space, gym.spaces.Graph):
+        return _graph(space)
     elif isinstance(space, gym.spaces.Tuple):
         return _tuple(space)
     elif isinstance(space, gym.spaces.Dict):
@@ -243,6 +254,15 @@ def gym_space_from_dict(d: Dict) -> gym.spaces.Space:
             }
         )
         return gym.spaces.Box(**__common(ret))
+
+    def _graph(d: Dict) -> gym.spaces.Graph:
+        # Spaces serialized before this used "nodes" for the node space.
+        node_space = d["node_space"] if "node_space" in d else d["nodes"]
+        edge_space = d.get("edge_space")
+        return gym.spaces.Graph(
+            node_space=gym_space_from_dict(node_space),
+            edge_space=None if edge_space is None else gym_space_from_dict(edge_space),
+        )
 
     def _discrete(d: Dict) -> gym.spaces.Discrete:
         return gym.spaces.Discrete(**__common(d))
@@ -301,6 +321,7 @@ def gym_space_from_dict(d: Dict) -> gym.spaces.Space:
         "dict": _dict,
         "simplex": _simplex,
         "repeated": _repeated,
+        "graph": _graph,
         "flex_dict": _flex_dict,
         "text": _text,
     }

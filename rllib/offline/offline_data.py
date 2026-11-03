@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+import os
+import sys
 import logging
 import time
 import types
@@ -23,6 +26,20 @@ if TYPE_CHECKING:
     from ray.rllib.algorithms.algorithm_config import AlgorithmConfig
 
 logger = logging.getLogger(__name__)
+
+
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        old_stderr = sys.stderr
+        try:
+            sys.stdout = devnull
+            sys.stderr = devnull
+            yield
+        finally:
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
 
 @PublicAPI(stability="alpha")
@@ -66,13 +83,16 @@ class OfflineData:
         if self.filesystem == "gcs":
             import gcsfs
 
-            self.filesystem_object = gcsfs.GCSFileSystem(**self.filesystem_kwargs)
+            self.filesystem_object = gcsfs.GCSFileSystem(
+                **self.filesystem_kwargs)
         elif self.filesystem == "s3":
-            self.filesystem_object = pyarrow.fs.S3FileSystem(**self.filesystem_kwargs)
+            self.filesystem_object = pyarrow.fs.S3FileSystem(
+                **self.filesystem_kwargs)
         elif self.filesystem == "abs":
             import adlfs
 
-            self.filesystem_object = adlfs.AzureBlobFileSystem(**self.filesystem_kwargs)
+            self.filesystem_object = adlfs.AzureBlobFileSystem(
+                **self.filesystem_kwargs)
         elif isinstance(self.filesystem, pyarrow.fs.FileSystem):
             self.filesystem_object = self.filesystem
         elif self.filesystem is not None:
@@ -187,10 +207,12 @@ class OfflineData:
 
             # Map the data to run the `OfflinePreLearner`s in the data pipeline
             # for training.
+            # PATCH: Use a small default batch size (1) instead of num_samples to enable lazy loading
+            # This prevents loading thousands of episodes into memory at once
             self.data = self.data.map_batches(
                 self.prelearner_class,
                 fn_constructor_kwargs=fn_constructor_kwargs,
-                batch_size=self.data_read_batch_size or num_samples,
+                batch_size=self.data_read_batch_size if self.data_read_batch_size is not None else 1,
                 **self.map_batches_kwargs,
             )
             # Set the flag to `True`.
@@ -203,7 +225,8 @@ class OfflineData:
         # `isinstance(self.batch_iterators, types.GeneratorType) == True`, we need
         # to create here a new iterator.
         if not self.batch_iterators or (
-            return_iterator and isinstance(self.batch_iterators, types.GeneratorType)
+            return_iterator and isinstance(
+                self.batch_iterators, types.GeneratorType)
         ):
             # If we have more than one learner create an iterator for each of them
             # by splitting the data stream.

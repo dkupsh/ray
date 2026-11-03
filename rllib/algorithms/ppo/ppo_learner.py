@@ -25,6 +25,10 @@ from ray.rllib.utils.schedules.scheduler import Scheduler
 from ray.rllib.utils.typing import ModuleID, TensorType
 
 
+# Learner state: the KL and entropy coefficients the loss currently uses.
+COMPONENT_PPO_CONTROL = "ppo_control"
+
+
 class PPOLearner(Learner):
     @override(Learner)
     def build(self) -> None:
@@ -116,6 +120,41 @@ class PPOLearner(Learner):
                     config=config,
                     kl_loss=kl_loss,
                 )
+
+    @override(Learner)
+    def get_state(self, components=None, *, not_components=None, **kwargs):
+        state = super().get_state(components, not_components=not_components, **kwargs)
+        # What the loss reads besides the weights and the optimizer: without it a
+        # resumed run restarts its KL control from the configured coefficient.
+        if self._check_component(COMPONENT_PPO_CONTROL, components, not_components):
+            state[COMPONENT_PPO_CONTROL] = {
+                "kl_coeff": {
+                    module_id: float(convert_to_numpy(coeff))
+                    for module_id, coeff in self.curr_kl_coeffs_per_module.items()
+                },
+                "entropy_coeff": {
+                    module_id: float(convert_to_numpy(scheduler.get_current_value()))
+                    for module_id, scheduler in (
+                        self.entropy_coeff_schedulers_per_module.items()
+                    )
+                },
+            }
+        return state
+
+    @override(Learner)
+    def set_state(self, state) -> None:
+        super().set_state(state)
+        control = state.get(COMPONENT_PPO_CONTROL)
+        if control is None:
+            return
+        for module_id, value in control["kl_coeff"].items():
+            self.curr_kl_coeffs_per_module[module_id].data.fill_(value)
+        for module_id, value in control["entropy_coeff"].items():
+            current = self.entropy_coeff_schedulers_per_module[
+                module_id
+            ].get_current_value()
+            if hasattr(current, "data"):
+                current.data.fill_(value)
 
     @classmethod
     @override(Learner)

@@ -385,6 +385,7 @@ class LearnerGroup(Checkpointable):
                     training_data.shard(
                         num_shards=len(self),
                         len_lookback_buffer=self.config.episode_lookback_horizon,
+                        artificial_rows_per_chunk=self.config.artificial_rows_per_chunk,
                         **kwargs,
                     )
                 )

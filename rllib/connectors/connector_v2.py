@@ -274,7 +274,8 @@ class ConnectorV2(Checkpointable, abc.ABC):
     def single_agent_episode_iterator(
         episodes: List[EpisodeType],
         agents_that_stepped_only: bool = True,
-        zip_with_batch_column: Optional[Union[List[Any], Dict[Tuple, Any]]] = None,
+        zip_with_batch_column: Optional[Union[List[Any],
+                                              Dict[Tuple, Any]]] = None,
     ) -> Iterator[SingleAgentEpisode]:
         """An iterator over a list of episodes yielding always SingleAgentEpisodes.
 

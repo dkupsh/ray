@@ -63,7 +63,7 @@ def is_composite_space(space: gym.Space) -> bool:
         gym.spaces.Graph,
         gym.spaces.Sequence,
         gym.spaces.Tuple,
-        gym.spaces.GraphInstance,
+        gym.spaces.GraphInstance
     ]:
         return True
     else:
@@ -212,6 +212,7 @@ def get_dummy_batch_for_space(
             edge_links = gen.integers(
                 low=0, high=num_nodes, size=(num_edges, 2), dtype=np.int32
             )
+
             return gym.spaces.GraphInstance(
                 nodes=get_dummy_batch_for_space(
                     space.node_space,
@@ -219,7 +220,7 @@ def get_dummy_batch_for_space(
                     fill_value=fill_value,
                     time_size=time_size,
                     time_major=time_major,
-                    one_hot_discrete=one_hot_discrete,
+                    one_hot_discrete=one_hot_discrete
                 ).reshape(num_nodes, -1),
                 edges=get_dummy_batch_for_space(
                     space.edge_space,
@@ -227,10 +228,11 @@ def get_dummy_batch_for_space(
                     fill_value=fill_value,
                     time_size=time_size,
                     time_major=time_major,
-                    one_hot_discrete=one_hot_discrete,
+                    one_hot_discrete=one_hot_discrete
                 ).reshape(num_edges, -1),
                 edge_links=edge_links,
             )
+
         return tuple([generate_graph_dummy() for _ in range(batch_size)])
 
     # Primitive spaces: Box, Discrete, MultiDiscrete.
@@ -359,6 +361,8 @@ def batch(
             flat[0], BatchedNdArray) or isinstance(flat[0], tuple)
 
     def batch_func(*s):
+        # PATCH: Handle GraphInstances and lists of GraphInstances specially
+        # GraphInstances should be batched as tuples, not stacked
         if isinstance(s[0], gym.spaces.GraphInstance):
             return tuple([item for item in s])
         elif isinstance(s[0], tuple) and len(s[0]) > 0 and isinstance(s[0][0], gym.spaces.GraphInstance):
@@ -372,6 +376,7 @@ def batch(
         else:
             return np.ascontiguousarray(np.stack(s, axis=0))
 
+    np_func = np.concatenate if individual_items_already_have_batch_dim else np.stack
     # PATCH: Disable strict type checking for graph structures to allow variable structures
     try:
         ret = graph_space_utils.map_structure(
@@ -415,18 +420,25 @@ def unbatch(batches_struct):
     """
     flat_batches = graph_space_utils.flatten(batches_struct)
 
-    # If there are no leaves or all leaves are None, return an empty list.
-    if not flat_batches or flat_batches[0] is None:
-        return []
+    # PATCH: a flat leaf can be None -- a Graph space with no edge space gives
+    # `edges=None` / `edge_links=None` -- and None has neither a length to read
+    # the batch size off nor an item to take per position. Read the size from
+    # the first leaf that HAS one and pass the Nones through untouched; when no
+    # leaf has one there is nothing to unbatch and the result is empty. With no
+    # None leaf this is the original: the size comes from flat_batches[0] and
+    # every leaf is subscripted.
+    batch_size = next((len(batch) for batch in flat_batches if batch is not None), 0)
 
     out = []
-    for batch_pos in range(len(flat_batches[0])):
+    for batch_pos in range(batch_size):
         out.append(
             graph_space_utils.unflatten_as(
                 batches_struct,
-                [flat_batches[i][batch_pos] for i in range(len(flat_batches))],
+                [None if batch is None else batch[batch_pos]
+                 for batch in flat_batches],
             )
         )
+
     return out
 
 

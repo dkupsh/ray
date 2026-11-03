@@ -1,5 +1,6 @@
 import dataclasses
 from collections import defaultdict
+import math
 from typing import List, Optional
 
 import tree  # pip install dm_tree
@@ -49,6 +50,7 @@ class TrainingData:
         self,
         num_shards: int,
         len_lookback_buffer: Optional[int] = None,
+        artificial_rows_per_chunk: int = 0,
         **kwargs,
     ):
         # Single batch -> Split into n smaller batches.
@@ -80,6 +82,7 @@ class TrainingData:
                     num_shards,
                     kwargs["minibatch_size"],
                     kwargs.get("num_epochs", 1),
+                    artificial_rows_per_chunk,
                 )
             return [
                 (
@@ -145,15 +148,22 @@ class TrainingData:
         num_shards,
         minibatch_size,
         num_epochs,
+        artificial_rows_per_chunk=0,
     ):
-        # Count total number of timesteps per module ID.
+        # Count total number of timesteps per module ID, with the artificial rows the
+        # learner connector adds to each chunk (AlgorithmConfig.artificial_rows_per_chunk):
+        # they take minibatch positions too, and leaving them out cuts every rank's last
+        # epoch short. Rounded up, for the same reason. Every rank takes this many steps,
+        # so a rank with more chunks than the others still gets somewhat fewer passes.
         if isinstance(episodes[0], MultiAgentEpisode):
             per_mod_ts = defaultdict(int)
             for ma_episode in episodes:
                 for sa_episode in ma_episode.agent_episodes.values():
-                    per_mod_ts[sa_episode.module_id] += len(sa_episode)
+                    per_mod_ts[sa_episode.module_id] += (
+                        len(sa_episode) + artificial_rows_per_chunk
+                    )
             max_ts = max(per_mod_ts.values())
         else:
-            max_ts = sum(map(len, episodes))
+            max_ts = sum(len(episode) + artificial_rows_per_chunk for episode in episodes)
 
-        return int((num_epochs * max_ts) / (num_shards * minibatch_size))
+        return math.ceil((num_epochs * max_ts) / (num_shards * minibatch_size))
