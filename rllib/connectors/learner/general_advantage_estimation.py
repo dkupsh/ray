@@ -119,21 +119,6 @@ class GeneralAdvantageEstimation(ConnectorV2):
             # Remove all zero-padding again, if applicable, for the upcoming
             # GAE computations.
             module_vf_preds = unpad_data_if_necessary(episode_lens, module_vf_preds)
-            # AddOneTsToEpisodesAndTruncate flags TERMINATEDS for v-trace: on every
-            # artificial row, and on the last real row of an ended episode. Here a
-            # terminated flag zeroes that row's value, so it belongs on the artificial
-            # row of an episode that really ended, and nowhere else: anything more cuts
-            # the return at every fragment boundary and drops V(s_{L-1}) from the rows
-            # before it. A truncated flag restarts the recursion from that row's value,
-            # which every artificial row needs: the next row in the batch is another
-            # chunk's, and its value must not reach this one.
-            module_terminateds = np.zeros(sum(episode_lens), dtype=np.float32)
-            module_truncateds = np.zeros(sum(episode_lens), dtype=np.float32)
-            module_truncateds[np.cumsum(episode_lens) - 1] = 1.0
-            module_terminateds[np.cumsum(episode_lens) - 1] = [
-                e.is_terminated for e in sa_episodes_list
-                if e.module_id in [None, module_id]
-            ]
             # Compute value targets.
             module_value_targets = compute_value_targets(
                 values=module_vf_preds,
@@ -141,8 +126,14 @@ class GeneralAdvantageEstimation(ConnectorV2):
                     episode_lens,
                     convert_to_numpy(batch[module_id][Columns.REWARDS]),
                 ),
-                terminateds=module_terminateds,
-                truncateds=module_truncateds,
+                terminateds=unpad_data_if_necessary(
+                    episode_lens,
+                    convert_to_numpy(batch[module_id][Columns.TERMINATEDS]),
+                ),
+                truncateds=unpad_data_if_necessary(
+                    episode_lens,
+                    convert_to_numpy(batch[module_id][Columns.TRUNCATEDS]),
+                ),
                 gamma=self.gamma,
                 lambda_=self.lambda_,
             )
