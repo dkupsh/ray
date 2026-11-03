@@ -273,7 +273,7 @@ def convert_to_torch_tensor(
     else:
         stream = None
 
-    def mapping(item):
+    def mapping(item, item_stream=stream):
         # Pass through None values.
         if item is None:
             return item
@@ -318,8 +318,8 @@ def convert_to_torch_tensor(
         # Move the tensor to the desired device.
         # For CUDA devices, use the provided stream context if available.
         if is_cuda:
-            if stream is not None:
-                with torch.cuda.stream(stream):
+            if item_stream is not None:
+                with torch.cuda.stream(item_stream):
                     tensor = tensor.to(device, non_blocking=True)
             else:
                 tensor = tensor.to(device, non_blocking=True)
@@ -329,18 +329,21 @@ def convert_to_torch_tensor(
 
         return tensor
 
+    # A graph's parts have always been converted by a nested
+    # convert_to_torch_tensor(part, device, pin_memory) call. That call passes
+    # no `use_stream`, so on CUDA it copies on the device's default stream.
+    graph_stream = torch.cuda.default_stream(device=device) if is_cuda else None
+
     def graph_part(part):
-        # A graph's nodes, edges and edge links are arrays, tensors or None.
-        # Converting each through a whole convert_to_torch_tensor call was
-        # most of the cost of converting a batch of graphs. Anything nested
-        # still goes through map_structure.
+        # Nodes, edges and edge links are arrays, tensors or None. A whole
+        # nested call for each was most of the cost of converting a batch of
+        # graphs, so convert those here, as that call would. Anything else
+        # still gets the nested call.
         if part is None or isinstance(part, np.ndarray) or torch.is_tensor(part):
-            return mapping(part)
-        return graph_space_utils.map_structure(mapping, part)
+            return mapping(part, graph_stream)
+        return convert_to_torch_tensor(part, device, pin_memory)
 
     def graph_to_tensors(graph):
-        # Graph parts are copied on the same stream, and pinned the same way,
-        # as every other leaf.
         return gym.spaces.GraphInstance(
             nodes=graph_part(graph.nodes),
             edges=graph_part(graph.edges),

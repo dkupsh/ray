@@ -29,13 +29,15 @@ cases go straight to the reference code, before `func` is called even once. So
 the results, the errors, and the order `func` is called in are always the
 reference's.
 
-The reference also rebuilds every Mapping from its (key, value) pairs before it
-calls `func`. That can change what `func` sees: SampleBatch's constructor
-turns list columns into arrays and pops "is_training". It can also raise, as
-defaultdict and mappingproxy do. A plain dict or OrderedDict rebuilds to
-itself, so it is walked as it is. Any other Mapping sends the map functions
-back to the reference's own first step, `unbatch_graph_instance` on every
-structure. They then walk what that returns.
+Only plain dicts and OrderedDicts are walked here. The reference rebuilds
+every Mapping from its sorted (key, value) pairs before it calls `func`, and
+again when it lays the results out. Those two types rebuild to an equal copy of
+themselves, so skipping the rebuild changes nothing. Any other Mapping
+anywhere in the input goes to the reference whole. SampleBatch's constructor
+turns list columns into arrays and pops "is_training", and defaultdict and
+mappingproxy raise. A Mapping can also count or reorder its own pairs, or
+change what it returns when read. In every such case the reference does what
+it always did, because it is what runs.
 """
 
 import collections
@@ -56,7 +58,7 @@ _LEAF_TYPES = frozenset(
     {np.ndarray, torch.Tensor, type(None), int, float, bool, str, bytes})
 
 # Mappings that rebuild from their sorted (key, value) pairs to an equal copy
-# of themselves, which is all the reference's unbatching does to them.
+# of themselves, and whose reads have no side effects: the only ones walked here.
 _PLAIN_MAPPINGS = frozenset({dict, collections.OrderedDict})
 
 
@@ -88,20 +90,14 @@ class _Mismatch(Exception):
     """The structures are not shaped alike: the reference decides what happens."""
 
 
-class _Rebuild(Exception):
-    """A Mapping whose rebuild the reference would run: see the module docstring."""
-
-
 # A treedef is None for a leaf, (_TUPLE | _LIST, [child treedefs]), or
 # (_MAPPING, type, sorted keys, [child treedefs]).
 
-def _gather(structs, leaves, paths, path, dicts_only, rebuilt):
+def _gather(structs, leaves, paths, path):
     """Check `structs` against structs[0], appending each leaf's arguments to
     `leaves` (and its path to `paths`, when given). Returns structs[0]'s
     treedef. Raises _Mismatch wherever the reference would not pair the
-    structures leaf for leaf. Raises _Rebuild at a Mapping the reference would
-    rebuild into something else, unless the structures are `rebuilt`
-    already."""
+    structures leaf for leaf, and at any Mapping not in _PLAIN_MAPPINGS."""
     s0 = structs[0]
     k = _kind(s0)
 
@@ -132,55 +128,27 @@ def _gather(structs, leaves, paths, path, dicts_only, rebuilt):
         for i in range(n):
             children.append(_gather(
                 [s[i] for s in structs], leaves, paths,
-                path + (i,) if paths is not None else None, dicts_only, rebuilt))
+                path + (i,) if paths is not None else None))
         return (k, children)
 
-    # Mapping.
-    if not rebuilt:
-        for s in structs:
-            if type(s) not in _PLAIN_MAPPINGS and _kind(s) == _MAPPING:
-                raise _Rebuild
-    if dicts_only and not isinstance(s0, dict):
-        # map_structure_with_path's reference walks only dicts, and makes any
-        # other Mapping a leaf.
-        raise _Mismatch
+    # Mapping. Any of the structures at this node not a plain one: the
+    # reference's (see the module docstring).
+    for s in structs:
+        if type(s) not in _PLAIN_MAPPINGS:
+            raise _Mismatch
     try:
         keys = sorted(s0.keys())
     except TypeError:
         raise _Mismatch
     for s in structs[1:]:
-        # keys(), not len(s): SampleBatch's len is its row count.
-        if _kind(s) != _MAPPING or len(s.keys()) != len(keys) or \
-                any(key not in s for key in keys):
+        if len(s) != len(keys) or any(key not in s for key in keys):
             raise _Mismatch
     children = []
     for key in keys:
         children.append(_gather(
             [s[key] for s in structs], leaves, paths,
-            path + (key,) if paths is not None else None, dicts_only, rebuilt))
+            path + (key,) if paths is not None else None))
     return (_MAPPING, type(s0), keys, children)
-
-
-def _gather_all(structures, paths, dicts_only):
-    """_gather from the top: (structures as walked, leaves, treedef). Nothing
-    in here calls `func`, so starting over on _Rebuild is free of side
-    effects."""
-    leaves = []
-    try:
-        return structures, leaves, _gather(
-            structures, leaves, paths, () if paths is not None else None,
-            dicts_only, False)
-    except _Rebuild:
-        pass
-    # The reference's own first step: same constructors, same order, same
-    # errors, all before `func` runs.
-    structures = [unbatch_graph_instance(s) for s in structures]
-    leaves.clear()
-    if paths is not None:
-        paths.clear()
-    return structures, leaves, _gather(
-        structures, leaves, paths, () if paths is not None else None,
-        dicts_only, True)
 
 
 def _build(treedef, it):
@@ -225,8 +193,9 @@ def _check_map_args(func, structures, kwargs):
 def map_structure(func, *structures, **kwargs):
     """Maps `func` through given structures, preserving variable-length tuples of GraphInstance."""
     check_types = _check_map_args(func, structures, kwargs)
+    leaves = []
     try:
-        _, leaves, treedef = _gather_all(structures, None, False)
+        treedef = _gather(structures, leaves, None, None)
     except _Mismatch:
         return _reference_map_structure(func, *structures, check_types=check_types)
     return _build(treedef, iter([func(*args) for args in leaves]))
@@ -246,9 +215,9 @@ def map_structure_with_path(func, *structures, **kwargs):
     accept or refuse.
     """
     check_types = _check_map_args(func, structures, kwargs)
-    paths = []
+    leaves, paths = [], []
     try:
-        walked, leaves, treedef = _gather_all(structures, paths, True)
+        treedef = _gather(structures, leaves, paths, ())
     except _Mismatch:
         return _reference_map_structure_with_path(
             func, *structures, check_types=check_types)
@@ -260,11 +229,11 @@ def map_structure_with_path(func, *structures, **kwargs):
     # becomes the first item of a tuple, which turns that tuple into a
     # graph batch, one leaf. Then repeat the reference's steps, errors and all.
     mapped = _build_plain(treedef, iter(results))
-    flat = flatten(mapped)
+    flat = flatten(mapped)  # the reference's flatten of it: read once, as there
     if len(flat) != len(results) or any(a is not b for a, b in zip(flat, results)):
-        # walked[0] lays out like the reference's unbatched first structure:
+        # structures[0] lays out like the reference's unbatched copy of it:
         # unflatten_as takes a bare graph and a batch of one as the same leaf.
-        return _reference_unflatten_as(walked[0], _reference_flatten(mapped))
+        return _reference_unflatten_as(structures[0], flat)
     return _build(treedef, iter(results))
 
 
@@ -291,6 +260,8 @@ def flatten(structure):
 
 
 def _unflatten_from(x, it):
+    """The reference's _unflatten, on plain containers only. Raises _Mismatch
+    at a Mapping not in _PLAIN_MAPPINGS, before reading anything from it."""
     k = _kind(x)
     if k <= _GRAPHS:
         return next(it)
@@ -298,23 +269,27 @@ def _unflatten_from(x, it):
         return tuple([_unflatten_from(item, it) for item in x])
     if k == _LIST:
         return [_unflatten_from(item, it) for item in x]
-    return type(x)((key, _unflatten_from(x[key], it)) for key in sorted(x.keys()))
+    if type(x) not in _PLAIN_MAPPINGS:
+        raise _Mismatch
+    return type(x)([(key, _unflatten_from(x[key], it)) for key in sorted(x.keys())])
 
 
 def unflatten_as(structure, flat_sequence):
     """Unflattens a flat sequence into a given structure, preserving variable-length GraphInstance tuples."""
+    # An iterator is the reference's: it reads one only as far as it needs.
     if not isinstance(flat_sequence, (list, tuple)):
-        # An iterator is consumed as it is read, and only as far as the
-        # reference reads it.
         return _reference_unflatten_as(structure, flat_sequence)
     it = iter(flat_sequence)
     try:
         result = _unflatten_from(structure, it)
-    except (StopIteration, TypeError):
-        # Too few elements, or unsortable keys: the reference's error.
+    except (StopIteration, TypeError, _Mismatch):
+        # Too few items, unsortable keys, or a Mapping the reference would
+        # rebuild into something else: the reference's, which starts over.
+        # Everything built so far was plain containers and list reads, which
+        # have no side effects.
         return _reference_unflatten_as(structure, flat_sequence)
     for _ in it:
-        return _reference_unflatten_as(structure, flat_sequence)  # too many: same
+        return _reference_unflatten_as(structure, flat_sequence)  # too many items
     return result
 
 

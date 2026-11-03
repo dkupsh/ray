@@ -271,6 +271,72 @@ def test_mappings_the_reference_rebuilds(make):
     _check_maps([make(), make()], check_types=True, by_content=True)
 
 
+def _logging_mappings(log):
+    """dict subclasses whose constructors and reads are observable: each
+    records what it does in `log`."""
+
+    class Counting(dict):
+        def __init__(self, pairs=()):
+            log.append("Counting()")
+            super().__init__(pairs)
+
+    class Reversing(dict):
+        def __init__(self, pairs=()):
+            log.append("Reversing()")
+            super().__init__(reversed(list(pairs)))
+
+    class Rejecting(dict):
+        def __init__(self, pairs=()):
+            pairs = list(pairs)
+            log.append("Rejecting()")
+            if any(value is None for _, value in pairs):
+                raise TypeError("None forbidden")
+            super().__init__(pairs)
+
+    class Changing(dict):
+        reads = 0
+
+        def __getitem__(self, key):
+            type(self).reads += 1
+            log.append(f"read {type(self).reads}")
+            return type(self).reads
+
+    return Counting, Reversing, Rejecting, Changing
+
+
+@pytest.mark.parametrize("case", [
+    "counting, mismatched", "counting, unflatten too long", "reversing order",
+    "rejecting results", "changing reads",
+])
+def test_observable_mappings_match_reference(case):
+    """Mappings whose constructors or reads have effects see the same calls,
+    in the same order, as with the reference."""
+
+    def run(fast):
+        ms = G.map_structure if fast else G._reference_map_structure
+        msp = G.map_structure_with_path if fast else G._reference_map_structure_with_path
+        unflatten = G.unflatten_as if fast else G._reference_unflatten_as
+
+        def go(calls):
+            Counting, Reversing, Rejecting, Changing = _logging_mappings(calls)
+            record = _recorder(calls)
+            if case == "counting, mismatched":
+                return (ms(record, {"x": Counting([("a", [1])])}, {"x": {"a": [1, 2]}}),)
+            if case == "counting, unflatten too long":
+                return unflatten(Counting([("a", 1)]), [2, 3])
+            if case == "reversing order":
+                return msp(lambda p, v: (calls.append(p), v)[1],
+                           Reversing([("a", 1), ("b", 2)]))
+            if case == "rejecting results":
+                return ms(lambda v: None, Rejecting([("a", 1)]))
+            changing = Changing(a=0)
+            return msp(lambda p, v: changing, 0)
+
+        return go
+
+    _assert_same(run(True), run(False))
+
+
 def test_graph_results_regroup_like_the_reference():
     """A graph returned for a tuple's first item makes the reference read that
     tuple as one graph batch when it flattens the results."""
