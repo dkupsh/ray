@@ -63,11 +63,9 @@ class Node:
             [self.action_space_size], dtype=np.float32)
         self.child_number_visits = np.zeros(
             [self.action_space_size], dtype=np.float32)
-        # Virtual-loss counters keyed by child action. Applied before
-        # leaf evaluation and reverted after the real value backs up.
+        # Virtual-loss visits keyed by child action. Applied before leaf
+        # evaluation and reverted after the real value backs up.
         self.child_virtual_loss_visits = np.zeros(
-            [self.action_space_size], dtype=np.float32)
-        self.child_virtual_loss_value = np.zeros(
             [self.action_space_size], dtype=np.float32)
 
         self.reward = reward
@@ -105,8 +103,11 @@ class Node:
     # --- PUCT scoring --------------------------------------------------
 
     def _effective_total_value(self) -> np.ndarray:
-        # Real backed-up totals + in-flight virtual losses on children.
-        return self.child_total_value + self.child_virtual_loss_value
+        # Real backed-up totals, with each in-flight visit counted as the worst
+        # value this search has seen, so a pending path only looks worse
+        # whatever the reward's scale and sign.
+        return (self.child_total_value
+                + self.child_virtual_loss_visits * self.mcts.pessimistic_q())
 
     def _effective_visits(self) -> np.ndarray:
         return self.child_number_visits + self.child_virtual_loss_visits
@@ -218,15 +219,14 @@ class Node:
         """Mark this path as in-flight: bump visits, debit value.
 
         Walks from this node up to (but not including) the root parent,
-        adding `loss` virtual visits and `-loss` to value on each edge.
-        Concurrent selectors then see Q lowered and N raised on this
-        path, so they prefer different leaves. Reverted in
-        `revert_virtual_loss` once the real value backs up.
+        adding `loss` virtual visits on each edge, each valued at the
+        search's worst Q (`MCTS.pessimistic_q`). Concurrent selectors then
+        see Q lowered and N raised on this path, so they prefer different
+        leaves. Reverted in `revert_virtual_loss` once the real value backs up.
         """
         node = self
         while node.parent is not None:
             node.parent.child_virtual_loss_visits[node.action] += loss
-            node.parent.child_virtual_loss_value[node.action] -= loss
             node = node.parent
 
     def revert_virtual_loss(self, loss: float) -> None:
@@ -234,7 +234,6 @@ class Node:
         node = self
         while node.parent is not None:
             node.parent.child_virtual_loss_visits[node.action] -= loss
-            node.parent.child_virtual_loss_value[node.action] += loss
             node = node.parent
 
 
@@ -256,8 +255,6 @@ class RootParentNode:
         # (whose parent is this stub) can be queried uniformly by
         # `Node.effective_number_visits`.
         self.child_virtual_loss_visits = np.zeros(
-            [env.action_space.n], dtype=np.float32)
-        self.child_virtual_loss_value = np.zeros(
             [env.action_space.n], dtype=np.float32)
 
 
@@ -319,6 +316,11 @@ class MCTS:
     def observe_q(self, q: float) -> None:
         self._q_min = min(self._q_min, q)
         self._q_max = max(self._q_max, q)
+
+    def pessimistic_q(self) -> float:
+        """The value of an in-flight visit: the worst Q this search has
+        backed up, or `-virtual_loss` before any."""
+        return self._q_min if np.isfinite(self._q_min) else -self.virtual_loss
 
     def normalized_q(self, q: np.ndarray) -> np.ndarray:
         # Until two distinct values were backed up there is no scale to apply.
@@ -394,19 +396,21 @@ class MCTS:
         sims_done = 0
         while sims_done < self.num_simulations:
             pending_leaves = []
+            fresh_count = 0
             target = min(self.batch_size,
                          self.num_simulations - sims_done)
             # Cap select retries when the only available leaf is
             # already pending — narrow trees can have no alternative.
             # Once we hit the cap we flush whatever's in the batch.
             retries_remaining = target * 4
-            while len(pending_leaves) < target and retries_remaining > 0:
+            # A reserved leaf is a simulation still to count, so the budget
+            # stops gathering, not just the batch size.
+            while (len(pending_leaves) < target and retries_remaining > 0
+                   and sims_done + fresh_count < self.num_simulations):
                 leaf = node.select()
                 if leaf.done:
                     leaf.backup(0.0)
                     sims_done += 1
-                    if sims_done >= self.num_simulations:
-                        break
                     continue
                 if leaf.is_pending_eval:
                     # Bump virtual loss along this path again so the
@@ -419,6 +423,7 @@ class MCTS:
                 leaf.is_pending_eval = True
                 leaf.apply_virtual_loss(loss)
                 pending_leaves.append((leaf, False))
+                fresh_count += 1
 
             # Separate fresh leaves (need eval) from duplicates (just
             # got extra virtual loss). Only fresh ones consume sims.

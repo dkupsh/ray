@@ -345,5 +345,39 @@ class TestValueTarget(unittest.TestCase):
         self.assertAlmostEqual(trajectory[0][VALUE_TARGET], 10.0)
 
 
+class TestBatchedSearch(unittest.TestCase):
+
+    def test_backups_equal_the_simulation_budget(self):
+        for budget in (7, 10, 33):
+            env = _ToyEnv()
+            mcts = MCTS(_uniform_priors_zero_value,
+                        {'num_simulations': budget, 'batch_size': 4},
+                        batched_priors_and_value=lambda obs_list: [
+                            _uniform_priors_zero_value(o) for o in obs_list])
+            obs, _ = env.reset()
+            root = Node(0, obs, False, 0.0, env.get_state(), mcts,
+                        parent=RootParentNode(env))
+            mcts._run_batched_simulations(root)
+            with self.subTest(budget=budget):
+                self.assertEqual(int(root.number_visits), budget)
+
+    def test_pending_visit_never_raises_q(self):
+        mcts = MCTS(None, {'num_simulations': 1, 'normalize_q': True})
+
+        class Env:
+            class action_space:
+                n = 2
+
+        root = Node(0, {'action_mask': np.array([True, True])}, False, 0.0,
+                    None, mcts, parent=RootParentNode(Env()))
+        bad = Node(1, root.obs, False, -100.0, None, mcts, parent=root)
+        root.children[1] = bad
+        bad.backup(0.0)
+        mcts.observe_q(0.0)
+        before = root.child_Q()[1]
+        bad.apply_virtual_loss(1.0)
+        self.assertLessEqual(root.child_Q()[1], before)
+
+
 if __name__ == '__main__':
     unittest.main()

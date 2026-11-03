@@ -1203,6 +1203,7 @@ class AlphaZero(Algorithm):
         # don't dominate as training progresses.
         self.replay_buffer = deque(maxlen=self.config.replay_buffer_size)
         self._transitions_since_sgd = 0
+        self._weights_changed = False
 
         # Curriculum bookkeeping. Snapshot the full (ADG, DFG) corpus at
         # setup time so we can restrict it per-iteration without losing
@@ -1527,12 +1528,20 @@ class AlphaZero(Algorithm):
         # than SP+SGD as in the legacy non-overlap path.
         if inflight is not None:
             results = ray.get(inflight)
+        # Only now, with no episode in flight, do the actors and inference
+        # servers take the new weights: every search of an episode uses one
+        # network, the previous iteration's.
+        if self._weights_changed:
+            with self.metrics.log_time((TIMERS, SYNCH_WORKER_WEIGHTS_TIMER)):
+                self._sync_driver_module()
+            self._weights_changed = False
         self.metrics.log_value(
             (TIMERS, ENV_RUNNER_SAMPLING_TIMER),
             time.perf_counter() - sp_start)
         for r in results:
                 self.replay_buffer.extend(r['trajectory'])
-                self._transitions_since_sgd += len(r['trajectory'])
+                # Credit what the env played, not the copies an env adds.
+                self._transitions_since_sgd += r['episode_length']
                 episode_returns.append(r['episode_return'])
                 episode_lengths.append(r['episode_length'])
                 episode_durations.append(r['duration_s'])
@@ -1632,23 +1641,27 @@ class AlphaZero(Algorithm):
         # iteration semantics.
 
     def _sgd_batches(self) -> list:
-        """`(batch size, minibatch size)` of each learner update this step."""
+        """`(batch size, minibatch size)` of each learner update this step.
+        With a replay ratio each update is one minibatch, drawn after the
+        last one's sampling counts were taken into account."""
         minibatch = self.config.sgd_minibatch_size
         ratio = self.config.sgd_steps_per_transition
         if ratio is None:
             return [(self.config.train_batch_size, minibatch)] * self.config.num_sgd_iter
-        steps = int(round(self._transitions_since_sgd * ratio))
-        return [(steps * minibatch, minibatch)] if steps > 0 else []
+        return [(minibatch, minibatch)] * int(round(self._transitions_since_sgd * ratio))
 
     def _maybe_run_sgd(self) -> None:
-        """SGD step on the replay buffer + broadcast updated weights.
+        """SGD step on the replay buffer.
 
         Runs while self-play is in flight on actors (pipelined). Skips
         until the buffer holds `replay_start_size` entries
-        (`sgd_minibatch_size` by default).
+        (`sgd_minibatch_size` by default); transitions added before then
+        earn no updates. The new weights reach the actors in
+        `training_step`, once this iteration's episodes are in.
         """
         start = self.config.replay_start_size or self.config.sgd_minibatch_size
         if len(self.replay_buffer) < start:
+            self._transitions_since_sgd = 0
             return
         updates = self._sgd_batches()
         self._transitions_since_sgd = 0
@@ -1664,17 +1677,7 @@ class AlphaZero(Algorithm):
         # Push learner stats (per-module policy/value loss, etc.)
         # under `learners/...` — same convention as MARWIL/PPO.
         self.metrics.aggregate(learner_results, key=LEARNER_RESULTS)
-
-        # Sync new weights to the driver module and (fire-and-forget)
-        # to all actors + inference servers. The in-flight self-play
-        # episodes for this iter still use the pre-SGD weights they
-        # were given at .remote() time; the NEXT iter's actor
-        # `run_episode` will FIFO-queue behind `set_weights` and pick
-        # up the new weights. That's the source of the 1-iter
-        # weight-staleness in the pipelined path — acceptable for
-        # replay-buffer algorithms.
-        with self.metrics.log_time((TIMERS, SYNCH_WORKER_WEIGHTS_TIMER)):
-            self._sync_driver_module()
+        self._weights_changed = True
 
     @override(Algorithm)
     def restore_from_path(self, path, *args, **kwargs):
