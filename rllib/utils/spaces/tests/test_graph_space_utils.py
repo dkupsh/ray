@@ -7,6 +7,7 @@ to the reference.
 """
 
 import collections
+import enum
 import random
 import sys
 import types
@@ -141,7 +142,8 @@ def _fp(x, by_content=False):
     if isinstance(x, list):
         return ("L", [_fp(i, by_content) for i in x])
     if isinstance(x, collections.abc.Mapping):
-        return ("M", type(x).__name__, [(k, _fp(v, by_content)) for k, v in x.items()])
+        return ("M", type(x).__name__,
+                [((type(k).__name__, repr(k)), _fp(v, by_content)) for k, v in x.items()])
     if isinstance(x, torch.Tensor):
         return ("tensor", tuple(x.shape), x.tolist())
     if isinstance(x, np.ndarray):
@@ -331,6 +333,70 @@ def test_observable_mappings_match_reference(case):
                 return ms(lambda v: None, Rejecting([("a", 1)]))
             changing = Changing(a=0)
             return msp(lambda p, v: changing, 0)
+
+        return go
+
+    _assert_same(run(True), run(False))
+
+
+@pytest.mark.parametrize("case", [
+    "tuple subclass indexing", "tuple subclass read twice", "flat list subclass",
+    "callback mutates input", "logging key hash", "StrEnum keys",
+])
+def test_observable_containers_and_keys_match_reference(case):
+    """Containers and keys with observable reads, iteration or hashing see the
+    same operations as with the reference; ordinary ones keep the fast path."""
+
+    def run(fast):
+        ms = G.map_structure if fast else G._reference_map_structure
+        msp = G.map_structure_with_path if fast else G._reference_map_structure_with_path
+        unflatten = G.unflatten_as if fast else G._reference_unflatten_as
+
+        def go(calls):
+            if case == "tuple subclass indexing":
+                class T(tuple):
+                    def __getitem__(self, i):
+                        return 99 if i == 1 else super().__getitem__(i)
+                return ms(_recorder(calls), T((1, 2)))
+            if case == "tuple subclass read twice":
+                class T(tuple):
+                    def __getitem__(self, i):
+                        calls.append(("getitem", i))
+                        if len(calls) > 1:
+                            raise ValueError("read twice")
+                        return super().__getitem__(i)
+                return unflatten([T((0,)), {}], [7, 8])
+            if case == "flat list subclass":
+                class L(list):
+                    def __iter__(self):
+                        calls.append("iter")
+                        return iter([7, 8] if calls.count("iter") == 1 else [9])
+                return unflatten(0, L([7, 8]))
+            if case == "callback mutates input":
+                x = [1, 2]
+
+                def callback(path, value):
+                    calls.append((path, value))
+                    x.clear()
+                    return [value + 10]
+                return msp(callback, x)
+            if case == "logging key hash":
+                class Key:
+                    def __hash__(self):
+                        calls.append("hash")
+                        return 1
+
+                    def __lt__(self, other):
+                        return False
+
+                    def __repr__(self):
+                        return "Key"
+                key = Key()
+                d = {key: 0}
+                calls.clear()
+                return ms(lambda v: len(calls), d)
+            members = enum.StrEnum("Names", ["b", "a"])
+            return ms(_recorder(calls), {members.b: 1, members.a: (_g1, _g2)})
 
         return go
 

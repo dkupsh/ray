@@ -22,25 +22,31 @@ graph observations those passes were 90-95% of the time spent batching it and
 converting it to tensors. The real work, `np.stack` and `torch.from_numpy`,
 was the rest.
 
-The fast path does not try to support everything. It handles each structure
-whose shape it can show is the same as the first one's. In every other case the
-reference code may pair leaves wrongly without saying so, or may raise. Those
-cases go straight to the reference code, before `func` is called even once. So
-the results, the errors, and the order `func` is called in are always the
-reference's.
+The contract: each public function returns what its reference returns, and
+raises what it raises. It calls `func` with the same arguments in the same
+order. It also performs the same observable operations on the input. The
+reference copies and re-reads its input many times over, so a container or
+dict key with side effects (a constructor that converts or reorders, a read
+that counts or changes, a hash that logs) would see a different sequence of
+operations from a single pass. The fast path therefore walks only what has
+none:
 
-Only plain dicts and OrderedDicts are walked here. The reference rebuilds
-every Mapping from its sorted (key, value) pairs before it calls `func`, and
-again when it lays the results out. Those two types rebuild to an equal copy of
-themselves, so skipping the rebuild changes nothing. Any other Mapping
-anywhere in the input goes to the reference whole. SampleBatch's constructor
-turns list columns into arrays and pops "is_training", and defaultdict and
-mappingproxy raise. A Mapping can also count or reorder its own pairs, or
-change what it returns when read. In every such case the reference does what
-it always did, because it is what runs.
+  * exact `tuple`, `list`, `dict` and `collections.OrderedDict` containers,
+    which rebuild to an equal copy of themselves;
+  * dict keys whose hashing, equality and ordering are those of str, int,
+    float, bool, bytes, None or Enum (a StrEnum key qualifies).
+
+Anything else, at any node of any structure, sends the whole call to the
+reference before anything is read from it. That covers a subclass of those
+containers, any other Mapping (SampleBatch's constructor turns list columns
+into arrays), another kind of key, and structures not shaped alike. Graphs
+of any GraphInstance subclass are leaves, which the reference passes on
+untouched, so they stay on the fast path. So does any other object that is not a
+container.
 """
 
 import collections
+import enum
 import gymnasium as gym
 from collections.abc import Mapping
 import numpy as np
@@ -48,46 +54,60 @@ import torch
 
 _GRAPH = gym.spaces.GraphInstance
 
-# What a node of a structure is. The first three are leaves.
-_LEAF, _GRAPH_ONE, _GRAPHS, _TUPLE, _LIST, _MAPPING = range(6)
+# What a node of a structure is. The first three are leaves; _OTHER is a
+# container the fast path does not walk.
+_LEAF, _GRAPH_ONE, _GRAPHS, _TUPLE, _LIST, _MAPPING, _OTHER = range(7)
 
-# Exact types that are always leaves. The set is fixed: a type found to be a
-# leaf at run time is not added, because registering it as a Mapping later
+# Exact types that are always leaves. Fixed: a type found to be a leaf at run
+# time is not added, because registering it as a Mapping later
 # (Mapping.register) would make it a container.
 _LEAF_TYPES = frozenset(
     {np.ndarray, torch.Tensor, type(None), int, float, bool, str, bytes})
 
-# Mappings that rebuild from their sorted (key, value) pairs to an equal copy
-# of themselves, and whose reads have no side effects: the only ones walked here.
 _PLAIN_MAPPINGS = frozenset({dict, collections.OrderedDict})
+
+# Dict keys of these exact types hash, compare and sort without side effects.
+_PURE_KEY_TYPES = frozenset({str, int, float, bool, bytes, type(None)})
+# The same methods, as a key of some other type (a StrEnum, say) inherits them.
+_PURE_KEY_METHODS = frozenset(
+    [getattr(t, name) for t in (str, int, float, bool, bytes, type(None), object)
+     for name in ("__hash__", "__eq__", "__lt__")]
+    + [enum.Enum.__hash__])
 
 
 def _kind(x):
     t = type(x)
     if t in _LEAF_TYPES:
         return _LEAF
-    if t is dict:
+    if t is dict or t is collections.OrderedDict:
         return _MAPPING
     if t is tuple:
+        # An exact tuple's x[0] is a read with no side effects.
         return _GRAPHS if x and isinstance(x[0], _GRAPH) else _TUPLE
-    if t is _GRAPH:
-        return _GRAPH_ONE
     if t is list:
         return _LIST
-    # Subclasses, in the order the reference tests them.
     if isinstance(x, _GRAPH):
         return _GRAPH_ONE
-    if isinstance(x, tuple):
-        return _GRAPHS if len(x) > 0 and isinstance(x[0], _GRAPH) else _TUPLE
-    if isinstance(x, list):
-        return _LIST
-    if isinstance(x, Mapping):
-        return _MAPPING
+    # A container of any other type: the reference's, before any read.
+    if isinstance(x, (tuple, list)) or isinstance(x, Mapping):
+        return _OTHER
     return _LEAF
 
 
+def _pure_keys(mapping):
+    """Whether every key of a plain dict hashes, compares and sorts with no
+    side effects. Reads only the keys' types."""
+    for key in mapping:
+        t = type(key)
+        if t not in _PURE_KEY_TYPES and not (
+                t.__hash__ in _PURE_KEY_METHODS and t.__eq__ in _PURE_KEY_METHODS
+                and t.__lt__ in _PURE_KEY_METHODS):
+            return False
+    return True
+
+
 class _Mismatch(Exception):
-    """The structures are not shaped alike: the reference decides what happens."""
+    """Not the fast path's to handle: the reference decides what happens."""
 
 
 # A treedef is None for a leaf, (_TUPLE | _LIST, [child treedefs]), or
@@ -97,32 +117,32 @@ def _gather(structs, leaves, paths, path):
     """Check `structs` against structs[0], appending each leaf's arguments to
     `leaves` (and its path to `paths`, when given). Returns structs[0]'s
     treedef. Raises _Mismatch wherever the reference would not pair the
-    structures leaf for leaf, and at any Mapping not in _PLAIN_MAPPINGS."""
+    structures leaf for leaf, and at anything outside the fast path (see the
+    module docstring), before reading it."""
     s0 = structs[0]
     k = _kind(s0)
+    kinds = [k] + [_kind(s) for s in structs[1:]]
+    if _OTHER in kinds:
+        raise _Mismatch
 
     if k <= _GRAPHS:
-        if len(structs) == 1:
-            leaves.append(((s0,) if k == _GRAPH_ONE else s0,))
-        else:
-            args = []
-            for s in structs:
-                ks = _kind(s)
-                # A container against a leaf: the reference flattens it into
-                # a different number of leaves. A plain leaf against a graph:
-                # the reference refuses it.
-                if ks > _GRAPHS or (k != _LEAF and ks == _LEAF):
-                    raise _Mismatch
-                args.append((s,) if ks == _GRAPH_ONE else s)
-            leaves.append(tuple(args))
+        args = []
+        for s, ks in zip(structs, kinds):
+            # A container against a leaf: the reference flattens it into a
+            # different number of leaves. A plain leaf against a graph: the
+            # reference refuses it.
+            if ks > _GRAPHS or (k != _LEAF and ks == _LEAF):
+                raise _Mismatch
+            args.append((s,) if ks == _GRAPH_ONE else s)
+        leaves.append(tuple(args))
         if paths is not None:
             paths.append(path)
         return None
 
     if k == _TUPLE or k == _LIST:
         n = len(s0)
-        for s in structs[1:]:
-            if _kind(s) != k or len(s) != n:
+        for s, ks in zip(structs, kinds):
+            if ks != k or len(s) != n:
                 raise _Mismatch
         children = []
         for i in range(n):
@@ -131,10 +151,9 @@ def _gather(structs, leaves, paths, path):
                 path + (i,) if paths is not None else None))
         return (k, children)
 
-    # Mapping. Any of the structures at this node not a plain one: the
-    # reference's (see the module docstring).
-    for s in structs:
-        if type(s) not in _PLAIN_MAPPINGS:
+    # Mapping.
+    for s, ks in zip(structs, kinds):
+        if ks != _MAPPING or not _pure_keys(s):
             raise _Mismatch
     try:
         keys = sorted(s0.keys())
@@ -159,10 +178,8 @@ def _build(treedef, it):
     if treedef[0] == _LIST:
         return [_build(child, it) for child in treedef[1]]
     _, mapping_type, keys, children = treedef
-    # A generator, as the reference passes: a Mapping type's constructor sees
-    # the same argument it did.
     return mapping_type(
-        (key, _build(child, it)) for key, child in zip(keys, children))
+        [(key, _build(child, it)) for key, child in zip(keys, children)])
 
 
 def _build_plain(treedef, it):
@@ -176,6 +193,22 @@ def _build_plain(treedef, it):
         return [_build_plain(child, it) for child in treedef[1]]
     _, _, keys, children = treedef
     return {key: _build_plain(child, it) for key, child in zip(keys, children)}
+
+
+def _skeleton(treedef):
+    """A structure shaped as `treedef`, with None for every leaf. The
+    reference's unflatten_as lays results out over it exactly as over the
+    structure `treedef` was read from, as that structure was then: func may
+    have changed it since."""
+    if treedef is None:
+        return None
+    if treedef[0] == _TUPLE:
+        return tuple([_skeleton(child) for child in treedef[1]])
+    if treedef[0] == _LIST:
+        return [_skeleton(child) for child in treedef[1]]
+    _, mapping_type, keys, children = treedef
+    return mapping_type(
+        [(key, _skeleton(child)) for key, child in zip(keys, children)])
 
 
 def _check_map_args(func, structures, kwargs):
@@ -223,17 +256,16 @@ def map_structure_with_path(func, *structures, **kwargs):
             func, *structures, check_types=check_types)
     results = [func(path, *args) for path, args in zip(paths, leaves)]
     # The reference builds the results into the structure, flattens that, and
-    # lays the flat list back out along the first structure. That is the
-    # results themselves unless the flatten regroups them. A result that is a
-    # container flattens into several leaves, or none. A graph result
-    # becomes the first item of a tuple, which turns that tuple into a
-    # graph batch, one leaf. Then repeat the reference's steps, errors and all.
+    # lays the flat list back out along its copy of the first structure. That
+    # gives back the results themselves unless the flatten regroups them. A
+    # result that is a container flattens into several leaves, or none. A graph
+    # result becomes the first item of a tuple, which turns that tuple into a
+    # graph batch, one leaf. In either case, repeat the reference's last step,
+    # errors and all.
     mapped = _build_plain(treedef, iter(results))
     flat = flatten(mapped)  # the reference's flatten of it: read once, as there
     if len(flat) != len(results) or any(a is not b for a, b in zip(flat, results)):
-        # structures[0] lays out like the reference's unbatched copy of it:
-        # unflatten_as takes a bare graph and a batch of one as the same leaf.
-        return _reference_unflatten_as(structures[0], flat)
+        return _reference_unflatten_as(_skeleton(treedef), flat)
     return _build(treedef, iter(results))
 
 
@@ -244,12 +276,19 @@ def _flatten_into(x, out):
     elif k == _TUPLE or k == _LIST:
         for item in x:
             _flatten_into(item, out)
-    else:
+    elif k == _MAPPING:
+        # The reference's own steps, on a plain dict: sorted keys, one read
+        # each, and its error.
         try:
             for key in sorted(x.keys()):
                 _flatten_into(x[key], out)
         except TypeError as e:
             raise TypeError("Cannot flatten dict with non-sortable keys") from e
+    else:
+        # A container the fast path does not walk: the reference flattens it,
+        # with every read and error its own. Any error is wrapped further by the
+        # dicts above it, as the reference wraps it.
+        out.extend(_reference_flatten(x))
 
 
 def flatten(structure):
@@ -260,8 +299,8 @@ def flatten(structure):
 
 
 def _unflatten_from(x, it):
-    """The reference's _unflatten, on plain containers only. Raises _Mismatch
-    at a Mapping not in _PLAIN_MAPPINGS, before reading anything from it."""
+    """The reference's _unflatten, over what the fast path walks. Raises
+    _Mismatch at anything else, before reading it."""
     k = _kind(x)
     if k <= _GRAPHS:
         return next(it)
@@ -269,24 +308,25 @@ def _unflatten_from(x, it):
         return tuple([_unflatten_from(item, it) for item in x])
     if k == _LIST:
         return [_unflatten_from(item, it) for item in x]
-    if type(x) not in _PLAIN_MAPPINGS:
+    if k == _OTHER or not _pure_keys(x):
         raise _Mismatch
     return type(x)([(key, _unflatten_from(x[key], it)) for key in sorted(x.keys())])
 
 
 def unflatten_as(structure, flat_sequence):
     """Unflattens a flat sequence into a given structure, preserving variable-length GraphInstance tuples."""
-    # An iterator is the reference's: it reads one only as far as it needs.
-    if not isinstance(flat_sequence, (list, tuple)):
+    # Only an exact list or tuple is read here, since reading it has no side
+    # effects. Anything else (an iterator, a subclass) is the reference's,
+    # which reads it once and only as far as it needs.
+    if type(flat_sequence) is not list and type(flat_sequence) is not tuple:
         return _reference_unflatten_as(structure, flat_sequence)
     it = iter(flat_sequence)
     try:
         result = _unflatten_from(structure, it)
     except (StopIteration, TypeError, _Mismatch):
-        # Too few items, unsortable keys, or a Mapping the reference would
-        # rebuild into something else: the reference's, which starts over.
-        # Everything built so far was plain containers and list reads, which
-        # have no side effects.
+        # Too few items, unsortable keys, or something outside the fast path.
+        # So far only plain containers have been built and only plain reads
+        # done, so starting over in the reference changes nothing observable.
         return _reference_unflatten_as(structure, flat_sequence)
     for _ in it:
         return _reference_unflatten_as(structure, flat_sequence)  # too many items
