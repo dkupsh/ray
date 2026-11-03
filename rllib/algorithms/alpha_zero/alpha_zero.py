@@ -42,6 +42,7 @@ from ray.rllib.core.columns import Columns
 from ray.rllib.core.rl_module.rl_module import RLModuleSpec
 from ray.rllib.policy.sample_batch import MultiAgentBatch, SampleBatch
 from ray.rllib.utils.annotations import override
+from ray.rllib.utils.checkpoints import Checkpointable
 from ray.rllib.utils.metrics.metrics_logger import MetricsLogger
 from ray.rllib.utils.metrics import (
     ENV_RUNNER_RESULTS,
@@ -98,6 +99,8 @@ _DEFAULT_MCTS_CONFIG = {
 # Extra columns the AlphaZero learner expects on every batch.
 MCTS_POLICY = 'mcts_policy'
 VALUE_TARGET = 'value_target'
+# Replay-entry counter of how often SGD sampled it (`prioritize_unsampled`).
+TIMES_SAMPLED = 'times_sampled'
 
 
 class AlphaZeroConfig(AlgorithmConfig):
@@ -185,6 +188,15 @@ class AlphaZeroConfig(AlgorithmConfig):
         # if a future model subclass forgets the internal autocast.
         self.inference_server_amp = True
         self.replay_buffer_size = 10_000
+        # SGD starts once the buffer holds this many entries. None starts it
+        # at `sgd_minibatch_size`.
+        self.replay_start_size: Optional[int] = None
+        # Sample entries drawn fewer times first: each entry's sampling
+        # weight is 1 / (1 + times it was sampled).
+        self.prioritize_unsampled = False
+        # Replay ratio: SGD minibatches per transition added since the last
+        # update. None runs `num_sgd_iter` batches of `train_batch_size`.
+        self.sgd_steps_per_transition: Optional[float] = None
         self.episodes_per_iter = 1
         self.sgd_minibatch_size = 128
         self.num_sgd_iter = 4
@@ -244,6 +256,9 @@ class AlphaZeroConfig(AlgorithmConfig):
         inference_server_compile: Optional[bool] = NotProvided,
         inference_server_amp: Optional[bool] = NotProvided,
         replay_buffer_size: Optional[int] = NotProvided,
+        replay_start_size: Optional[int] = NotProvided,
+        prioritize_unsampled: Optional[bool] = NotProvided,
+        sgd_steps_per_transition: Optional[float] = NotProvided,
         episodes_per_iter: Optional[int] = NotProvided,
         sgd_minibatch_size: Optional[int] = NotProvided,
         num_sgd_iter: Optional[int] = NotProvided,
@@ -286,6 +301,12 @@ class AlphaZeroConfig(AlgorithmConfig):
             self.inference_server_amp = inference_server_amp
         if replay_buffer_size is not NotProvided:
             self.replay_buffer_size = replay_buffer_size
+        if replay_start_size is not NotProvided:
+            self.replay_start_size = replay_start_size
+        if prioritize_unsampled is not NotProvided:
+            self.prioritize_unsampled = prioritize_unsampled
+        if sgd_steps_per_transition is not NotProvided:
+            self.sgd_steps_per_transition = sgd_steps_per_transition
         if episodes_per_iter is not NotProvided:
             self.episodes_per_iter = episodes_per_iter
         if sgd_minibatch_size is not NotProvided:
@@ -598,7 +619,10 @@ class _SelfPlayWorker:
         )
 
         trajectory = []
-        max_steps = int(self.env.action_space.n) * 4
+        # Envs that know how long an episode can be say so; the action count
+        # says nothing about it.
+        max_steps = getattr(self.env, 'max_episode_steps',
+                            int(self.env.action_space.n) * 4)
         steps = 0
 
         while not node.done and steps < max_steps:
@@ -641,6 +665,11 @@ class _SelfPlayWorker:
         for entry in reversed(trajectory):
             running = entry['reward'] + self.gamma * running
             entry[VALUE_TARGET] = float(running) / self.value_target_scale
+
+        # An env may add equivalent entries, e.g. the trajectory under the
+        # symmetries of the problem it just ran.
+        if hasattr(self.env, 'augment_trajectory'):
+            trajectory = self.env.augment_trajectory(trajectory)
 
         # MCTS expansions write checkpoints into the C++ backend; drop them.
         if hasattr(self.env, 'clear_checkpoints'):
@@ -1173,6 +1202,7 @@ class AlphaZero(Algorithm):
         # Replay buffer — bounded FIFO so old (stale-policy) MCTS targets
         # don't dominate as training progresses.
         self.replay_buffer = deque(maxlen=self.config.replay_buffer_size)
+        self._transitions_since_sgd = 0
 
         # Curriculum bookkeeping. Snapshot the full (ADG, DFG) corpus at
         # setup time so we can restrict it per-iteration without losing
@@ -1383,6 +1413,11 @@ class AlphaZero(Algorithm):
                 # so training doesn't deadlock on `swap_file`.
                 spec = dict(self._curriculum_full_corpus)
 
+        self._set_train_specification(spec)
+
+    def _set_train_specification(self, spec) -> None:
+        """Make every env, the driver's and each self-play actor's, sample
+        from `spec` from its next episode on."""
         self._driver_env.set_train_specification(spec)
         if self._self_play_actors:
             # Fire-and-forget; the run_episode calls in this same
@@ -1497,6 +1532,7 @@ class AlphaZero(Algorithm):
             time.perf_counter() - sp_start)
         for r in results:
                 self.replay_buffer.extend(r['trajectory'])
+                self._transitions_since_sgd += len(r['trajectory'])
                 episode_returns.append(r['episode_return'])
                 episode_lengths.append(r['episode_length'])
                 episode_durations.append(r['duration_s'])
@@ -1595,20 +1631,35 @@ class AlphaZero(Algorithm):
         # post-iter buffer size, matching the legacy non-overlap
         # iteration semantics.
 
+    def _sgd_batches(self) -> list:
+        """`(batch size, minibatch size)` of each learner update this step."""
+        minibatch = self.config.sgd_minibatch_size
+        ratio = self.config.sgd_steps_per_transition
+        if ratio is None:
+            return [(self.config.train_batch_size, minibatch)] * self.config.num_sgd_iter
+        steps = int(round(self._transitions_since_sgd * ratio))
+        return [(steps * minibatch, minibatch)] if steps > 0 else []
+
     def _maybe_run_sgd(self) -> None:
         """SGD step on the replay buffer + broadcast updated weights.
 
         Runs while self-play is in flight on actors (pipelined). Skips
-        until the buffer holds at least `sgd_minibatch_size` samples.
+        until the buffer holds `replay_start_size` entries
+        (`sgd_minibatch_size` by default).
         """
-        if len(self.replay_buffer) < self.config.sgd_minibatch_size:
+        start = self.config.replay_start_size or self.config.sgd_minibatch_size
+        if len(self.replay_buffer) < start:
+            return
+        updates = self._sgd_batches()
+        self._transitions_since_sgd = 0
+        if not updates:
             return
         with self.metrics.log_time((TIMERS, LEARNER_UPDATE_TIMER)):
-            for _ in range(self.config.num_sgd_iter):
-                batch = self._build_batch(self.config.train_batch_size)
+            for batch_size, minibatch_size in updates:
+                batch = self._build_batch(batch_size)
                 learner_results = self.learner_group.update(
                     batch=batch,
-                    minibatch_size=self.config.sgd_minibatch_size,
+                    minibatch_size=minibatch_size,
                 )
         # Push learner stats (per-module policy/value loss, etc.)
         # under `learners/...` — same convention as MARWIL/PPO.
@@ -1624,6 +1675,14 @@ class AlphaZero(Algorithm):
         # replay-buffer algorithms.
         with self.metrics.log_time((TIMERS, SYNCH_WORKER_WEIGHTS_TIMER)):
             self._sync_driver_module()
+
+    @override(Algorithm)
+    def restore_from_path(self, path, *args, **kwargs):
+        """Self-play, not EnvRunners, holds the acting weights: restore the
+        components, then hand the restored weights to the driver module, the
+        self-play actors and the inference servers."""
+        Checkpointable.restore_from_path(self, path, *args, **kwargs)
+        self._sync_driver_module()
 
     @override(Algorithm)
     def evaluate(self, parallel_train_future=None):
@@ -1666,11 +1725,17 @@ class AlphaZero(Algorithm):
         and `value_target`. Observations are kept as-is (the model's
         forward path is responsible for batch handling).
         """
-        if len(self.replay_buffer) < n:
-            idx = np.random.choice(len(self.replay_buffer), size=n, replace=True)
-        else:
-            idx = np.random.choice(len(self.replay_buffer), size=n, replace=False)
+        size = len(self.replay_buffer)
+        weights = None
+        if self.config.prioritize_unsampled:
+            weights = 1.0 / (1.0 + np.array(
+                [e.get(TIMES_SAMPLED, 0) for e in self.replay_buffer], dtype=np.float64))
+            weights /= weights.sum()
+        idx = np.random.choice(size, size=n, replace=size < n, p=weights)
         entries = [self.replay_buffer[i] for i in idx]
+        if self.config.prioritize_unsampled:
+            for e in entries:
+                e[TIMES_SAMPLED] = e.get(TIMES_SAMPLED, 0) + 1
 
         # Stack observation dict leaves. Keep numpy throughout — the
         # learner connector / TorchLearner converts to torch as needed.
