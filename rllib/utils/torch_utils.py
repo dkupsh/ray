@@ -301,24 +301,9 @@ def convert_to_torch_tensor(
             else:
                 tensor = torch.from_numpy(item)
         elif isinstance(item, tuple) and len(item) > 0 and isinstance(item[0], gym.spaces.GraphInstance):
-            return_tuples = []
-            for graph in item:
-                return_tuples.append(gym.spaces.GraphInstance(
-                    nodes=convert_to_torch_tensor(
-                        graph.nodes, device, pin_memory),
-                    edges=convert_to_torch_tensor(
-                        graph.edges, device, pin_memory),
-                    edge_links=convert_to_torch_tensor(
-                        graph.edge_links, device, pin_memory),
-                ))
-            return tuple(return_tuples)
+            return tuple([graph_to_tensors(graph) for graph in item])
         elif isinstance(item, gym.spaces.GraphInstance):
-            return gym.spaces.GraphInstance(
-                nodes=convert_to_torch_tensor(item.nodes, device, pin_memory),
-                edges=convert_to_torch_tensor(item.edges, device, pin_memory),
-                edge_links=convert_to_torch_tensor(
-                    item.edge_links, device, pin_memory),
-            )
+            return graph_to_tensors(item)
         else:
             tensor = torch.from_numpy(np.asarray(item))
 
@@ -343,6 +328,24 @@ def convert_to_torch_tensor(
             tensor = tensor.to(device)
 
         return tensor
+
+    def graph_part(part):
+        # A graph's nodes, edges and edge links are arrays, tensors or None.
+        # Converting each through a whole convert_to_torch_tensor call was
+        # most of the cost of converting a batch of graphs. Anything nested
+        # still goes through map_structure.
+        if part is None or isinstance(part, np.ndarray) or torch.is_tensor(part):
+            return mapping(part)
+        return graph_space_utils.map_structure(mapping, part)
+
+    def graph_to_tensors(graph):
+        # Graph parts are copied on the same stream, and pinned the same way,
+        # as every other leaf.
+        return gym.spaces.GraphInstance(
+            nodes=graph_part(graph.nodes),
+            edges=graph_part(graph.edges),
+            edge_links=graph_part(graph.edge_links),
+        )
 
     tensor = graph_space_utils.map_structure(mapping, x)
 
