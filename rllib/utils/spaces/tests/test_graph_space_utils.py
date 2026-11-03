@@ -9,6 +9,8 @@ to the reference.
 import collections
 import random
 import sys
+import types
+from collections.abc import Mapping
 
 import gymnasium as gym
 import numpy as np
@@ -127,41 +129,44 @@ def _mutate(rng, s):
     return {"a": _leaf(rng)}
 
 
-def _fp(x):
+def _fp(x, by_content=False):
     """Container types, key order, and leaf identity. A view or a tensor is a
     new object each time it is taken from its parent, so those compare by
-    content."""
+    content; so does every array when `by_content`, for structures whose
+    rebuild makes new arrays on each run."""
     if isinstance(x, GI):
-        return ("GI", _fp(x.nodes), _fp(x.edges), _fp(x.edge_links))
+        return ("GI",) + tuple(_fp(i, by_content) for i in x)
     if isinstance(x, tuple):
-        return ("T", type(x).__name__) + tuple(_fp(i) for i in x)
+        return ("T", type(x).__name__) + tuple(_fp(i, by_content) for i in x)
     if isinstance(x, list):
-        return ("L", [_fp(i) for i in x])
+        return ("L", [_fp(i, by_content) for i in x])
     if isinstance(x, collections.abc.Mapping):
-        return ("M", type(x).__name__, [(k, _fp(v)) for k, v in x.items()])
+        return ("M", type(x).__name__, [(k, _fp(v, by_content)) for k, v in x.items()])
     if isinstance(x, torch.Tensor):
         return ("tensor", tuple(x.shape), x.tolist())
     if isinstance(x, np.ndarray):
-        return ("view", x.shape, x.tolist()) if x.base is not None else ("id", id(x))
+        if by_content or x.base is not None:
+            return ("array", x.dtype.str, x.shape, x.tolist())
+        return ("id", id(x))
     return ("v", repr(x))
 
 
-def _outcome(fn):
+def _outcome(fn, by_content=False):
     calls = []
     try:
-        return ("ok", _fp(fn(calls)), calls)
+        return ("ok", _fp(fn(calls), by_content), calls)
     except Exception as e:
         return ("err", type(e).__name__, str(e), calls)
 
 
-def _recorder(calls, with_path=False, containers=False):
+def _recorder(calls, with_path=False, containers=False, by_content=False):
     count = [0]
 
     def func(*args):
         if with_path:
             calls.append(("path", args[0]))
             args = args[1:]
-        calls.append(tuple(_fp(a) for a in args))
+        calls.append(tuple(_fp(a, by_content) for a in args))
         count[0] += 1
         result = ("r", count[0])
         # Every third result a container: the reference re-flattens those.
@@ -172,19 +177,20 @@ def _recorder(calls, with_path=False, containers=False):
     return func
 
 
-def _assert_same(fast, ref):
-    assert _outcome(fast) == _outcome(ref)
+def _assert_same(fast, ref, by_content=False):
+    assert _outcome(fast, by_content) == _outcome(ref, by_content)
 
 
-def _check_maps(structs, check_types, containers=False):
+def _check_maps(structs, check_types, containers=False, by_content=False):
     def run(fn, with_path):
         return lambda calls: fn(
-            _recorder(calls, with_path, containers and with_path),
+            _recorder(calls, with_path, containers and with_path, by_content),
             *structs, check_types=check_types)
 
-    _assert_same(run(G.map_structure, False), run(G._reference_map_structure, False))
+    _assert_same(run(G.map_structure, False), run(G._reference_map_structure, False),
+                 by_content)
     _assert_same(run(G.map_structure_with_path, True),
-                 run(G._reference_map_structure_with_path, True))
+                 run(G._reference_map_structure_with_path, True), by_content)
 
 
 @pytest.mark.parametrize("seed", range(8))
@@ -240,6 +246,65 @@ def test_edge_cases_match_reference(structs, check_types):
     _check_maps(structs, check_types)
     _assert_same(lambda c: G.flatten(structs[0]),
                  lambda c: G._reference_flatten(structs[0]))
+
+
+def _sample_batch_with_list_column():
+    batch = SampleBatch({"a": np.ones(2)})
+    batch["a"] = [1, 2]  # the reference's rebuild turns this back into an array
+    return batch
+
+
+@pytest.mark.parametrize("make", [
+    pytest.param(_sample_batch_with_list_column, id="SampleBatch list column"),
+    pytest.param(lambda: SampleBatch({"a": np.ones(2), "is_training": True}),
+                 id="SampleBatch is_training, popped on rebuild"),
+    pytest.param(lambda: collections.defaultdict(int, a=1), id="defaultdict"),
+    pytest.param(lambda: types.MappingProxyType({"a": 1}),
+                 id="mappingproxy"),
+    pytest.param(lambda: {"x": [collections.defaultdict(int, a=1)]},
+                 id="defaultdict nested in a dict"),
+])
+def test_mappings_the_reference_rebuilds(make):
+    """The reference rebuilds a Mapping before calling func: what func sees,
+    and any constructor error, come from that rebuild."""
+    _check_maps([make()], check_types=True, by_content=True)
+    _check_maps([make(), make()], check_types=True, by_content=True)
+
+
+def test_graph_results_regroup_like_the_reference():
+    """A graph returned for a tuple's first item makes the reference read that
+    tuple as one graph batch when it flattens the results."""
+    g = GI(np.ones((1, 1)), None, None)
+
+    def run(fn):
+        return lambda calls: fn(lambda p, x: (calls.append(p), g)[1], (1, 2))
+
+    _assert_same(run(G.map_structure_with_path),
+                 run(G._reference_map_structure_with_path))
+
+
+def test_unflatten_as_reads_an_iterator_as_far_as_the_reference():
+    def values(read):
+        for i in range(5):
+            read.append(i)
+            yield i
+
+    _assert_same(lambda read: G.unflatten_as(0, values(read)),
+                 lambda read: G._reference_unflatten_as(0, values(read)))
+
+
+def test_types_registered_as_mappings_later():
+    class Late:
+        def keys(self):
+            return ["a"]
+
+        def __getitem__(self, key):
+            return 7
+
+    x = Late()
+    assert G.flatten(x) == [x]
+    Mapping.register(Late)
+    assert G.flatten(x) == G._reference_flatten(x) == [7]
 
 
 def test_graph_conventions():
