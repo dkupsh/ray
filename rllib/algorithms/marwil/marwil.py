@@ -154,6 +154,9 @@ class MARWILConfig(AlgorithmConfig):
         tuner.fit()
     """
 
+    # Rows the learner connector adds to each episode chunk (see LearnerGroup.update).
+    artificial_rows_per_chunk = 1
+
     def __init__(self, algo_class=None):
         """Initializes a MARWILConfig instance."""
         self.exploration_config = {

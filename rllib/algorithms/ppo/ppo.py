@@ -105,6 +105,9 @@ class PPOConfig(AlgorithmConfig):
         ...
     """
 
+    # Rows the learner connector adds to each episode chunk (see LearnerGroup.update).
+    artificial_rows_per_chunk = 1
+
     def __init__(self, algo_class=None):
         """Initializes a PPOConfig instance."""
         self.exploration_config = {

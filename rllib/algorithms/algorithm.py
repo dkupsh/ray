@@ -551,8 +551,7 @@ class Algorithm(Checkpointable, Trainable):
             boundaries=DEFAULT_HISTOGRAM_BOUNDARIES_LONG_EVENTS,
             tag_keys=("rllib",),
         )
-        self._metrics_step_time.set_default_tags(
-            {"rllib": self.__class__.__name__})
+        self._metrics_step_time.set_default_tags({"rllib": self.__class__.__name__})
 
         self._metrics_run_one_training_iteration_time = Histogram(
             name="rllib_algorithm_run_one_training_iteration_time",
@@ -600,8 +599,7 @@ class Algorithm(Checkpointable, Trainable):
             boundaries=DEFAULT_HISTOGRAM_BOUNDARIES_LONG_EVENTS,
             tag_keys=("rllib",),
         )
-        self._metrics_evaluate_time.set_default_tags(
-            {"rllib": self.__class__.__name__})
+        self._metrics_evaluate_time.set_default_tags({"rllib": self.__class__.__name__})
 
         self._metrics_evaluate_sync_env_runner_weights_time = Histogram(
             name="rllib_algorithm_evaluate_sync_env_runner_weights_time",
@@ -1217,105 +1215,115 @@ class Algorithm(Checkpointable, Trainable):
                 and (self.iteration + 1) % self.config.offline_evaluation_interval == 0
             )
 
-            # Results dict for training (and if appolicable: evaluation).
-            eval_results: ResultDict = {}
+        # Evaluate on the first iteration when the run asks for it. Only
+        # this flag is conditional: the training below is what step() does
+        # every iteration, so it does not belong inside this branch.
+        if (
+            self.config.evaluation_interval
+            and self.config.evaluation_interval > 0
+            and self.iteration == 0
+            and self.config.evaluation_on_start
+        ):
+            evaluate_this_iter = True
 
-            # Parallel eval + training: Kick off evaluation-loop and parallel train() call.
-            if evaluate_this_iter and (
-                self.config.evaluation_parallel_to_training
-                or self.config.offline_evaluation_parallel_to_training
-            ):
+        # Results dict for training (and if appolicable: evaluation).
+        eval_results: ResultDict = {}
+
+        # Parallel eval + training: Kick off evaluation-loop and parallel train() call.
+        if evaluate_this_iter and (
+            self.config.evaluation_parallel_to_training
+            or self.config.offline_evaluation_parallel_to_training
+        ):
+            (
+                train_results,
+                eval_results,
+                train_iter_ctx,
+            ) = self._run_one_training_iteration_and_evaluation_in_parallel()
+
+        # - No evaluation necessary, just run the next training iteration.
+        # - We have to evaluate in this training iteration, but no parallelism ->
+        #   evaluate after the training iteration is entirely done.
+        else:
+            if self.config.enable_env_runner_and_connector_v2:
+                train_results, train_iter_ctx = self._run_one_training_iteration()
+            else:
                 (
                     train_results,
-                    eval_results,
                     train_iter_ctx,
-                ) = self._run_one_training_iteration_and_evaluation_in_parallel()
+                ) = self._run_one_training_iteration_old_api_stack()
 
-            # - No evaluation necessary, just run the next training iteration.
-            # - We have to evaluate in this training iteration, but no parallelism ->
-            #   evaluate after the training iteration is entirely done.
+        # Sequential: Train (already done above), then evaluate.
+        if evaluate_this_iter and not self.config.evaluation_parallel_to_training:
+            eval_results = self._run_one_evaluation(parallel_train_future=None)
+
+        if evaluate_offline_this_iter:
+            offline_eval_results = self._run_one_offline_evaluation()
+            # If we already have online evaluation results merge the offline
+            # evaluation results.
+            if eval_results:
+                eval_results[EVALUATION_RESULTS].update(
+                    offline_eval_results[EVALUATION_RESULTS]
+                )
+            # Otherwise, just assign.
             else:
-                if self.config.enable_env_runner_and_connector_v2:
-                    train_results, train_iter_ctx = self._run_one_training_iteration()
-                else:
-                    (
-                        train_results,
-                        train_iter_ctx,
-                    ) = self._run_one_training_iteration_old_api_stack()
+                eval_results = offline_eval_results
 
-            # Sequential: Train (already done above), then evaluate.
-            if evaluate_this_iter and not self.config.evaluation_parallel_to_training:
-                eval_results = self._run_one_evaluation(
-                    parallel_train_future=None)
-
-            if evaluate_offline_this_iter:
-                offline_eval_results = self._run_one_offline_evaluation()
-                # If we already have online evaluation results merge the offline
-                # evaluation results.
-                if eval_results:
-                    eval_results[EVALUATION_RESULTS].update(
-                        offline_eval_results[EVALUATION_RESULTS]
-                    )
-                # Otherwise, just assign.
-                else:
-                    eval_results = offline_eval_results
-
-            # Sync EnvRunner workers.
-            # TODO (sven): For the new API stack, the common execution pattern for any algo
-            #  should be: [sample + get_metrics + get_state] -> send all these in one remote
-            #  call down to `training_step` (where episodes are sent as ray object
-            #  references). Then distribute the episode refs to the learners, store metrics
-            #  in special key in result dict and perform the connector merge/broadcast
-            #  inside the `training_step` as well. See the new IMPALA for an example.
-            if self.config.enable_env_runner_and_connector_v2:
-                if (
-                    not self.config._dont_auto_sync_env_runner_states
-                    and self.env_runner_group
+        # Sync EnvRunner workers.
+        # TODO (sven): For the new API stack, the common execution pattern for any algo
+        #  should be: [sample + get_metrics + get_state] -> send all these in one remote
+        #  call down to `training_step` (where episodes are sent as ray object
+        #  references). Then distribute the episode refs to the learners, store metrics
+        #  in special key in result dict and perform the connector merge/broadcast
+        #  inside the `training_step` as well. See the new IMPALA for an example.
+        if self.config.enable_env_runner_and_connector_v2:
+            if (
+                not self.config._dont_auto_sync_env_runner_states
+                and self.env_runner_group
+            ):
+                # Synchronize EnvToModule and ModuleToEnv connector states and broadcast
+                # new states back to all EnvRunners.
+                with self.metrics.log_time(
+                    (TIMERS, SYNCH_ENV_CONNECTOR_STATES_TIMER)
                 ):
-                    # Synchronize EnvToModule and ModuleToEnv connector states and broadcast
-                    # new states back to all EnvRunners.
-                    with self.metrics.log_time(
-                        (TIMERS, SYNCH_ENV_CONNECTOR_STATES_TIMER)
+                    with TimerAndPrometheusLogger(
+                        self._metrics_step_sync_env_runner_states_time
                     ):
-                        with TimerAndPrometheusLogger(
-                            self._metrics_step_sync_env_runner_states_time
-                        ):
-                            self.env_runner_group.sync_env_runner_states(
-                                config=self.config,
-                                env_steps_sampled=self.metrics.peek(
-                                    (
-                                        ENV_RUNNER_RESULTS,
-                                        NUM_ENV_STEPS_SAMPLED_LIFETIME,
-                                    ),
-                                    default=0,
+                        self.env_runner_group.sync_env_runner_states(
+                            config=self.config,
+                            env_steps_sampled=self.metrics.peek(
+                                (
+                                    ENV_RUNNER_RESULTS,
+                                    NUM_ENV_STEPS_SAMPLED_LIFETIME,
                                 ),
-                                env_to_module=self.env_to_module_connector,
-                                module_to_env=self.module_to_env_connector,
-                            )
-                # Compile final ResultDict from `train_results` and `eval_results`. Note
-                # that, as opposed to the old API stack, EnvRunner stats should already be
-                # in `train_results` and `eval_results`.
-                results = self._compile_iteration_results(
-                    train_results=train_results,
-                    eval_results=eval_results,
-                )
-            else:
-                self._sync_filters_if_needed(
-                    central_worker=self.env_runner_group.local_env_runner,
-                    workers=self.env_runner_group,
-                    config=self.config,
-                )
-                # Get EnvRunner metrics and compile them into results.
-                episodes_this_iter = collect_episodes(
-                    self.env_runner_group,
-                    self._remote_worker_ids_for_metrics(),
-                    timeout_seconds=self.config.metrics_episode_collection_timeout_s,
-                )
-                results = self._compile_iteration_results_old_api_stack(
-                    episodes_this_iter=episodes_this_iter,
-                    step_ctx=train_iter_ctx,
-                    iteration_results={**train_results, **eval_results},
-                )
+                                default=0,
+                            ),
+                            env_to_module=self.env_to_module_connector,
+                            module_to_env=self.module_to_env_connector,
+                        )
+            # Compile final ResultDict from `train_results` and `eval_results`. Note
+            # that, as opposed to the old API stack, EnvRunner stats should already be
+            # in `train_results` and `eval_results`.
+            results = self._compile_iteration_results(
+                train_results=train_results,
+                eval_results=eval_results,
+            )
+        else:
+            self._sync_filters_if_needed(
+                central_worker=self.env_runner_group.local_env_runner,
+                workers=self.env_runner_group,
+                config=self.config,
+            )
+            # Get EnvRunner metrics and compile them into results.
+            episodes_this_iter = collect_episodes(
+                self.env_runner_group,
+                self._remote_worker_ids_for_metrics(),
+                timeout_seconds=self.config.metrics_episode_collection_timeout_s,
+            )
+            results = self._compile_iteration_results_old_api_stack(
+                episodes_this_iter=episodes_this_iter,
+                step_ctx=train_iter_ctx,
+                iteration_results={**train_results, **eval_results},
+            )
 
         return results
 
@@ -1653,8 +1661,7 @@ class Algorithm(Checkpointable, Trainable):
             * self.config.dataset_num_iters_per_eval_runner
         )
 
-        logger.info(
-            f"Evaluating current state of {self} for {duration} {unit}.")
+        logger.info(f"Evaluating current state of {self} for {duration} {unit}.")
 
         results = self.offline_eval_runner_group.local_runner.run()
 
@@ -1915,8 +1922,7 @@ class Algorithm(Checkpointable, Trainable):
                 results = (
                     self.eval_env_runner_group.foreach_env_runner_async_fetch_ready(
                         func=_env_runner_remote,
-                        kwargs={"num": _num, "round": _round,
-                                "iter": algo_iteration},
+                        kwargs={"num": _num, "round": _round, "iter": algo_iteration},
                         tag="_env_runner_remote",
                     )
                 )
@@ -1935,8 +1941,7 @@ class Algorithm(Checkpointable, Trainable):
             else:
                 results = (
                     self.eval_env_runner_group.foreach_env_runner_async_fetch_ready(
-                        func=lambda w: (
-                            w.sample(), w.get_metrics(), algo_iteration),
+                        func=lambda w: (w.sample(), w.get_metrics(), algo_iteration),
                         tag="env_runner_sample_and_get_metrics",
                     )
                 )
@@ -2199,8 +2204,7 @@ class Algorithm(Checkpointable, Trainable):
 
                 results = (
                     self.eval_env_runner_group.foreach_env_runner_async_fetch_ready(
-                        func=lambda w: (
-                            w.sample(), w.get_metrics(), algo_iteration),
+                        func=lambda w: (w.sample(), w.get_metrics(), algo_iteration),
                         remote_worker_ids=selected_eval_worker_ids,
                         tag="env_runner_sample_and_get_metrics",
                     )
@@ -2343,8 +2347,7 @@ class Algorithm(Checkpointable, Trainable):
         else:
             multi_rl_module_spec = (
                 self.learner_group.foreach_learner(
-                    lambda learner: MultiRLModuleSpec.from_module(
-                        learner.module)
+                    lambda learner: MultiRLModuleSpec.from_module(learner.module)
                 )
                 .result_or_errors[0]
                 .get()
@@ -2375,13 +2378,11 @@ class Algorithm(Checkpointable, Trainable):
             ):
                 for module_id, module in er.module._rl_modules.copy().items():
                     if module_id not in multi_rl_module_spec.rl_module_specs:
-                        er.module.remove_module(
-                            module_id, raise_err_if_not_found=True)
+                        er.module.remove_module(module_id, raise_err_if_not_found=True)
                 # Add modules, if necessary.
                 for mid, mod_spec in multi_rl_module_spec.rl_module_specs.items():
                     if mid not in er.module:
-                        er.module.add_module(
-                            mid, mod_spec.build(), override=False)
+                        er.module.add_module(mid, mod_spec.build(), override=False)
             # Now that the MultiRLModule is fixed, update the state.
             er.set_state(ray.get(state_ref))
 
@@ -2440,8 +2441,7 @@ class Algorithm(Checkpointable, Trainable):
                 remote_worker_ids=restored,
                 local_runner=False,
                 timeout_seconds=self.evaluation_config.offline_eval_runner_restore_timeout_s,
-                kwargs={
-                    "iterator": runner_group._offline_data_iterators[restored]},
+                kwargs={"iterator": runner_group._offline_data_iterators[restored]},
             )
 
         return restored
@@ -3256,8 +3256,7 @@ class Algorithm(Checkpointable, Trainable):
                             COMPONENT_RL_MODULE, components
                         ),
                         not_components=force_list(
-                            self._get_subcomponents(
-                                COMPONENT_RL_MODULE, not_components)
+                            self._get_subcomponents(COMPONENT_RL_MODULE, not_components)
                         )
                         # We don't want the RLModule state from the EnvRunners (it's
                         # `inference_only` anyway and already provided in full by the
@@ -3385,13 +3384,11 @@ class Algorithm(Checkpointable, Trainable):
         elif self.config.is_online and not self.env_runner:
             if self.env_to_module_connector:
                 components.append(
-                    (COMPONENT_ENV_TO_MODULE_CONNECTOR,
-                     self.env_to_module_connector),
+                    (COMPONENT_ENV_TO_MODULE_CONNECTOR, self.env_to_module_connector),
                 )
             if self.module_to_env_connector:
                 components.append(
-                    (COMPONENT_MODULE_TO_ENV_CONNECTOR,
-                     self.module_to_env_connector),
+                    (COMPONENT_MODULE_TO_ENV_CONNECTOR, self.module_to_env_connector),
                 )
         if self.eval_env_runner:
             components.append(
@@ -3546,8 +3543,7 @@ class Algorithm(Checkpointable, Trainable):
             eval_env_runner_bundles = []
 
         if cls._should_create_offline_evaluation_runners(eval_config):
-            offline_eval_runner_bundles = _get_offline_eval_runner_bundles(
-                eval_config)
+            offline_eval_runner_bundles = _get_offline_eval_runner_bundles(eval_config)
         else:
             offline_eval_runner_bundles = []
 
@@ -3824,8 +3820,7 @@ class Algorithm(Checkpointable, Trainable):
                     while not train_iter_ctx.should_stop(has_run_once):
                         # Before training step, try to bring failed workers back.
                         with self.metrics.log_time((TIMERS, RESTORE_ENV_RUNNERS_TIMER)):
-                            restored = self.restore_env_runners(
-                                self.env_runner_group)
+                            restored = self.restore_env_runners(self.env_runner_group)
                             # Fire the callback for re-created EnvRunners.
                             if restored:
                                 self._make_on_env_runners_recreated_callbacks(
@@ -3956,12 +3951,10 @@ class Algorithm(Checkpointable, Trainable):
                     with self.metrics.log_time(
                         (TIMERS, RESTORE_EVAL_ENV_RUNNERS_TIMER)
                     ):
-                        restored = self.restore_env_runners(
-                            self.eval_env_runner_group)
+                        restored = self.restore_env_runners(self.eval_env_runner_group)
                 else:
                     with self._timers["restore_eval_workers"]:
-                        restored = self.restore_env_runners(
-                            self.eval_env_runner_group)
+                        restored = self.restore_env_runners(self.eval_env_runner_group)
                 # Fire the callback for re-created EnvRunners.
                 if restored:
                     self._make_on_env_runners_recreated_callbacks(
@@ -4542,8 +4535,7 @@ class Algorithm(Checkpointable, Trainable):
             with TrainIterCtx(algo=self) as train_iter_ctx:
                 while not train_iter_ctx.should_stop(training_step_results):
                     with self._timers["restore_workers"]:
-                        restored = self.restore_env_runners(
-                            self.env_runner_group)
+                        restored = self.restore_env_runners(self.env_runner_group)
                         # Fire the callback for re-created EnvRunners.
                         if restored:
                             self._make_on_env_runners_recreated_callbacks(

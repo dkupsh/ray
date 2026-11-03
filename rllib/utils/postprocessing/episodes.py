@@ -41,7 +41,14 @@ def add_one_ts_to_episodes_and_truncate(episodes: List[SingleAgentEpisode]):
         episode.t += 1
         # Use the episode API that allows appending (possibly complex) structs
         # to the data.
-        episode.observations.insert(episode.observations[-2], -1)
+        # The learner reads the first len(episode) observations, so the artificial
+        # row of an episode that goes on must read the next observation, s_L: it is
+        # what the value bootstrap is taken from. An episode that ended is never
+        # bootstrapped, and its last observation may offer no action at all.
+        if episode.is_terminated:
+            episode.observations.insert(episode.observations[-2], -1)
+        else:
+            episode.observations.append(episode.observations[-1])
         episode.infos.insert(episode.infos[-2], -1)
         episode.actions.append(episode.actions[-1])
         episode.rewards.append(0.0)
