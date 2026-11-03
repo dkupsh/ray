@@ -7,7 +7,6 @@ to the reference.
 """
 
 import collections
-import enum
 import random
 import sys
 import types
@@ -341,7 +340,7 @@ def test_observable_mappings_match_reference(case):
 
 @pytest.mark.parametrize("case", [
     "tuple subclass indexing", "tuple subclass read twice", "flat list subclass",
-    "callback mutates input", "logging key hash", "StrEnum keys",
+    "callback mutates input", "logging key hash", "str subclass keys",
 ])
 def test_observable_containers_and_keys_match_reference(case):
     """Containers and keys with observable reads, iteration or hashing see the
@@ -395,12 +394,36 @@ def test_observable_containers_and_keys_match_reference(case):
                 d = {key: 0}
                 calls.clear()
                 return ms(lambda v: len(calls), d)
-            members = enum.StrEnum("Names", ["b", "a"])
-            return ms(_recorder(calls), {members.b: 1, members.a: (_g1, _g2)})
+            return ms(_recorder(calls), {_Name("b"): 1, _Name("a"): (_g1, _g2)})
 
         return go
 
     _assert_same(run(True), run(False))
+
+
+class _Name(str):
+    """A str subclass key that overrides nothing."""
+
+
+def test_inheriting_keys_stay_on_the_fast_path(monkeypatch):
+    """Keys of a subclass that inherits builtin hashing and ordering are
+    walked here, not handed to the reference; ones that override them are."""
+    def refuse(*args, **kwargs):
+        raise AssertionError("handed to the reference")
+
+    monkeypatch.setattr(G, "_reference_map_structure", refuse)
+    monkeypatch.setattr(G, "_reference_map_structure_with_path", refuse)
+    structure = {_Name("b"): np.ones(2), _Name("a"): {_Name("g"): (_g1, _g2)}}
+    out = G.map_structure(lambda a, b: a, structure, structure)
+    assert list(out) == ["a", "b"] and all(type(k) is _Name for k in out)
+    G.map_structure_with_path(lambda p, v: v, structure)
+
+    class Hashing(str):
+        def __hash__(self):
+            return super().__hash__()
+
+    with pytest.raises(AssertionError, match="handed to the reference"):
+        G.map_structure(lambda v: v, {Hashing("a"): 1})
 
 
 def test_graph_results_regroup_like_the_reference():

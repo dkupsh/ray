@@ -33,8 +33,9 @@ none:
 
   * exact `tuple`, `list`, `dict` and `collections.OrderedDict` containers,
     which rebuild to an equal copy of themselves;
-  * dict keys whose hashing, equality and ordering are those of str, int,
-    float, bool, bytes, None or Enum (a StrEnum key qualifies).
+  * dict keys whose hashing, equality and ordering are the builtin ones of
+    str, int, float, bool, bytes, None or object. A key of a subclass that
+    does not override them qualifies too.
 
 Anything else, at any node of any structure, sends the whole call to the
 reference before anything is read from it. That covers a subclass of those
@@ -46,7 +47,6 @@ container.
 """
 
 import collections
-import enum
 import gymnasium as gym
 from collections.abc import Mapping
 import numpy as np
@@ -68,11 +68,11 @@ _PLAIN_MAPPINGS = frozenset({dict, collections.OrderedDict})
 
 # Dict keys of these exact types hash, compare and sort without side effects.
 _PURE_KEY_TYPES = frozenset({str, int, float, bool, bytes, type(None)})
-# The same methods, as a key of some other type (a StrEnum, say) inherits them.
+# Those types' own methods, which a key of another type (a subclass, say)
+# can inherit.
 _PURE_KEY_METHODS = frozenset(
-    [getattr(t, name) for t in (str, int, float, bool, bytes, type(None), object)
-     for name in ("__hash__", "__eq__", "__lt__")]
-    + [enum.Enum.__hash__])
+    getattr(t, name) for t in (str, int, float, bool, bytes, type(None), object)
+    for name in ("__hash__", "__eq__", "__lt__"))
 
 
 def _kind(x):
